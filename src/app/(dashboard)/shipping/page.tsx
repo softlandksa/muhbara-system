@@ -543,14 +543,18 @@ export default function ShippingPage() {
   const [bulkStatusOpen, setBulkStatusOpen] = useState(false);
   const [bulkLoading, setBulkLoading] = useState(false);
   const [bulkSelectedIds, setBulkSelectedIds] = useState<string[]>([]);
+  const [rowLoadingId, setRowLoadingId] = useState<string | null>(null);
 
-  // Safety: @base-ui may leave pointer-events:none or overflow:hidden on body after a modal closes.
-  // This effect fires whenever ANY dialog fully closes and resets those inline styles.
+  // Safety: @base-ui leaves pointer-events:none on body during dialog close.
+  // Use a 200ms timeout (longer than any animation) so this always runs after base-ui cleans up.
   const anyDialogOpen = !!shipTarget || !!statusTarget || bulkShipOpen || bulkStatusOpen || bulkLoading;
   useEffect(() => {
     if (!anyDialogOpen) {
-      document.body.style.pointerEvents = "";
-      document.body.style.overflow = "";
+      const timer = setTimeout(() => {
+        document.body.style.pointerEvents = "";
+        document.body.style.overflow = "";
+      }, 200);
+      return () => clearTimeout(timer);
     }
   }, [anyDialogOpen]);
 
@@ -718,6 +722,26 @@ export default function ShippingPage() {
     invalidateAll();
   };
 
+  const handleRowStatusChange = async (shippingInfoId: string, subStatusId: string) => {
+    setRowLoadingId(shippingInfoId);
+    try {
+      const res = await fetch(`/api/shipping/${shippingInfoId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ subStatusId }),
+      });
+      let json: { error?: string; data?: { isDelivered?: boolean } } = {};
+      try { json = await res.json(); } catch { /* non-JSON */ }
+      if (!res.ok) { toast.error(json.error ?? "فشل تحديث الحالة"); return; }
+      toast.success(json.data?.isDelivered ? "تم تسجيل التسليم بنجاح" : "تم تحديث حالة الشحن");
+      invalidateAll();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "حدث خطأ في الاتصال");
+    } finally {
+      setRowLoadingId(null);
+    }
+  };
+
   // ── Tab change ──
   const handleTabChange = (tabId: string) => {
     setActiveTab(tabId);
@@ -812,7 +836,7 @@ export default function ShippingPage() {
       )}
 
       {/* Unified table */}
-      <div className="rounded-lg border overflow-hidden">
+      <div className="rounded-lg border overflow-clip">
         <Table>
           <TableHeader>
             <TableRow>
@@ -965,7 +989,36 @@ export default function ShippingPage() {
                     className="sticky left-0 z-[1] bg-card"
                     onClick={(e) => e.stopPropagation()}
                   >
-                    {order.status.name === "جاهز للشحن" ? (
+                    {order.shippingInfo ? (
+                      <div className="flex items-center gap-1.5 min-w-[9rem]">
+                        {rowLoadingId === order.shippingInfo.id ? (
+                          <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                        ) : (
+                          <select
+                            dir="rtl"
+                            className="w-full text-xs rounded-md border border-input bg-background px-2 py-1.5 text-foreground shadow-sm focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
+                            value={order.shippingInfo.shippingSubStatus?.id ?? ""}
+                            onChange={(e) => {
+                              e.stopPropagation();
+                              const subStatusId = e.target.value;
+                              if (!subStatusId || !order.shippingInfo) return;
+                              handleRowStatusChange(order.shippingInfo.id, subStatusId);
+                            }}
+                          >
+                            {!order.shippingInfo.shippingSubStatus && (
+                              <option value="" disabled>اختر الحالة</option>
+                            )}
+                            {shippingStatuses.flatMap((p) =>
+                              p.subs.map((s) => (
+                                <option key={s.id} value={s.id}>
+                                  {p.name} — {s.name}
+                                </option>
+                              ))
+                            )}
+                          </select>
+                        )}
+                      </div>
+                    ) : order.status.name === "جاهز للشحن" ? (
                       <Button
                         size="sm"
                         onClick={(e) => { e.stopPropagation(); setShipTarget(order); }}
@@ -973,15 +1026,6 @@ export default function ShippingPage() {
                       >
                         <Truck className="h-3.5 w-3.5" />
                         شحن
-                      </Button>
-                    ) : order.shippingInfo ? (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={(e) => { e.stopPropagation(); setStatusTarget(order); }}
-                        className="whitespace-nowrap"
-                      >
-                        تغيير الحالة
                       </Button>
                     ) : (
                       <span className="text-sm text-muted-foreground">—</span>
@@ -994,45 +1038,54 @@ export default function ShippingPage() {
         </Table>
       </div>
 
-      {/* Single Ship Dialog */}
-      <ShipDialog
-        order={shipTarget}
-        companies={companies}
-        statuses={shippingStatuses}
-        open={!!shipTarget}
-        onClose={() => setShipTarget(null)}
-        onShipped={handleShipped}
-      />
+      {/* Single Ship Dialog — conditionally mounted so base-ui never sets body
+          pointer-events when the dialog is closed */}
+      {shipTarget && (
+        <ShipDialog
+          order={shipTarget}
+          companies={companies}
+          statuses={shippingStatuses}
+          open={!!shipTarget}
+          onClose={() => setShipTarget(null)}
+          onShipped={handleShipped}
+        />
+      )}
 
       {/* Bulk Ship Dialog */}
-      <BulkShipDialog
-        orders={selectedReadyOrders}
-        companies={companies}
-        statuses={shippingStatuses}
-        open={bulkShipOpen}
-        onClose={() => setBulkShipOpen(false)}
-        onShipped={handleBulkShipDone}
-      />
+      {bulkShipOpen && (
+        <BulkShipDialog
+          orders={selectedReadyOrders}
+          companies={companies}
+          statuses={shippingStatuses}
+          open={bulkShipOpen}
+          onClose={() => setBulkShipOpen(false)}
+          onShipped={handleBulkShipDone}
+        />
+      )}
 
       {/* Bulk Shipping Status Dialog */}
-      <BulkShippingStatusDialog
-        orderIds={bulkSelectedIds}
-        statuses={shippingStatuses}
-        companies={companies}
-        open={bulkStatusOpen}
-        loading={bulkLoading}
-        onClose={() => { if (!bulkLoading) setBulkStatusOpen(false); }}
-        onSubmit={handleBulkStatusSubmit}
-      />
+      {bulkStatusOpen && (
+        <BulkShippingStatusDialog
+          orderIds={bulkSelectedIds}
+          statuses={shippingStatuses}
+          companies={companies}
+          open={bulkStatusOpen}
+          loading={bulkLoading}
+          onClose={() => { if (!bulkLoading) setBulkStatusOpen(false); }}
+          onSubmit={handleBulkStatusSubmit}
+        />
+      )}
 
       {/* Single Status Dialog */}
-      <SingleStatusDialog
-        order={statusTarget}
-        statuses={shippingStatuses}
-        open={!!statusTarget}
-        onClose={() => setStatusTarget(null)}
-        onDone={handleStatusDone}
-      />
+      {statusTarget && (
+        <SingleStatusDialog
+          order={statusTarget}
+          statuses={shippingStatuses}
+          open={!!statusTarget}
+          onClose={() => setStatusTarget(null)}
+          onDone={handleStatusDone}
+        />
+      )}
     </div>
   );
 }

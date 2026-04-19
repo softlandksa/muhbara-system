@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -8,7 +8,7 @@ import { format, formatDistanceToNow } from "date-fns";
 import { arSA } from "date-fns/locale";
 import {
   ArrowRight, Loader2, MessageSquare, Package, MapPin, Phone,
-  CreditCard, Truck, Clock, FileText, Trash2, RefreshCw,
+  CreditCard, Truck, Clock, FileText, Trash2, RefreshCw, Pencil,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -23,6 +23,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
+import { ShippingStatusDialog } from "@/components/shared/ShippingStatusDialog";
 import { ROLE_LABELS } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
 
@@ -43,6 +44,17 @@ type FollowUpNote = {
   note: string;
   createdAt: string;
   createdBy: { id: string; name: string };
+};
+
+type ShippingCompany = { id: string; name: string; trackingUrl: string | null };
+type ShippingStatusSub = {
+  id: string;
+  name: string;
+  colorOverride: string | null;
+  marksOrderDelivered: boolean;
+};
+type ShippingStatusItem = {
+  id: string; name: string; color: string; sortOrder: number; subs: ShippingStatusSub[];
 };
 
 type OrderDetail = {
@@ -72,25 +84,53 @@ type OrderDetail = {
   }[];
   shippingInfo: {
     id: string;
-    trackingNumber: string;
+    trackingNumber: string | null;
     shippedAt: string;
     deliveredAt: string | null;
     notes: string | null;
     shippingCompany: { id: string; name: string; trackingUrl: string | null };
     shippedBy: { id: string; name: string };
+    shippingSubStatus: {
+      id: string;
+      name: string;
+      colorOverride: string | null;
+      marksOrderDelivered: boolean;
+      primary: { id: string; name: string; color: string };
+    } | null;
   } | null;
 };
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
+// Maps each role to the action buttons it may see on the order detail page.
+const ROLE_ACTIONS: Record<string, string[]> = {
+  ADMIN:    ["edit", "delete", "ship", "comment"],
+  SHIPPING: ["edit", "delete", "ship", "comment"],
+  SALES:    ["edit"],
+  FOLLOWUP: ["comment"],
+};
+
 const ACTION_LABELS: Record<string, string> = {
-  CREATE: "إنشاء الطلب",
-  STATUS_CHANGE: "تغيير الحالة",
-  SHIPPING_STATUS_UPDATE: "تحديث حالة الشحن",
-  NOTE_ADDED: "ملاحظة متابعة",
-  FIELD_UPDATE: "تحديث حقل",
-  IMPORT_ORDER: "استيراد طلب",
-  SHIP_ORDER: "شحن الطلب",
+  CREATE:                  "إنشاء الطلب",
+  UPDATE:                  "تعديل بيانات الطلب",
+  STATUS_CHANGE:           "تغيير الحالة",
+  SHIPPING_STATUS_UPDATE:  "تحديث حالة الشحن",
+  NOTE_ADDED:              "تعليق على الطلب",
+  FIELD_UPDATE:            "تحديث حقل",
+  IMPORT_ORDER:            "استيراد طلب",
+  SHIP_ORDER:              "شحن الطلب",
+};
+
+const FIELD_LABELS: Record<string, string> = {
+  customerName:    "اسم العميل",
+  phone:           "رقم الجوال",
+  address:         "العنوان",
+  status:          "حالة الطلب",
+  shippingStatus:  "حالة الشحن",
+  countryId:       "الدولة",
+  currencyId:      "العملة",
+  paymentMethodId: "طريقة الدفع",
+  notes:           "الملاحظات",
 };
 
 // ─── Timeline Item ────────────────────────────────────────────────────────────
@@ -118,7 +158,7 @@ function TimelineItem({ entry }: { entry: TimelineEntry }) {
       <div className="flex-1 min-w-0">
         <div className="flex items-center justify-between gap-2">
           <span className="text-sm font-medium">
-            {isNote ? "ملاحظة متابعة" : ACTION_LABELS[entry.data.action] ?? entry.data.action}
+            {isNote ? "تعليق على الطلب" : ACTION_LABELS[entry.data.action] ?? entry.data.action}
           </span>
           <Tooltip>
             <TooltipTrigger className="text-xs text-muted-foreground whitespace-nowrap cursor-default">
@@ -129,18 +169,27 @@ function TimelineItem({ entry }: { entry: TimelineEntry }) {
             </TooltipContent>
           </Tooltip>
         </div>
-        <p className="text-xs text-muted-foreground">{author}</p>
+        <p className="text-xs text-muted-foreground">
+          <span className="font-medium text-foreground/70">{author}</span>
+          {" · "}
+          <span>{format(date, "dd/MM/yyyy HH:mm", { locale: arSA })}</span>
+        </p>
         {isNote && (
           <p className="mt-1 text-sm bg-muted rounded-md px-3 py-2">{(entry.data as FollowUpNote).note}</p>
         )}
         {!isNote && (entry.data as AuditLog).fieldName && (
           <p className="text-xs text-muted-foreground mt-0.5">
-            {(entry.data as AuditLog).fieldName}:{" "}
+            <span className="font-medium">
+              {FIELD_LABELS[(entry.data as AuditLog).fieldName!] ?? (entry.data as AuditLog).fieldName}
+            </span>
+            {": "}
             {(entry.data as AuditLog).oldValue && (
               <span className="line-through text-destructive/70">{(entry.data as AuditLog).oldValue}</span>
             )}
-            {(entry.data as AuditLog).oldValue && " → "}
-            <span className="text-green-600">{(entry.data as AuditLog).newValue}</span>
+            {(entry.data as AuditLog).oldValue && (entry.data as AuditLog).newValue && " ← "}
+            {(entry.data as AuditLog).newValue && (
+              <span className="text-green-600">{(entry.data as AuditLog).newValue}</span>
+            )}
           </p>
         )}
       </div>
@@ -156,7 +205,26 @@ export default function OrderDetailPage() {
   const { data: session } = useSession();
   const queryClient = useQueryClient();
   const [noteText, setNoteText] = useState("");
+  const [noteExpanded, setNoteExpanded] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [statusDialogOpen, setStatusDialogOpen] = useState(false);
+  const [statusDialogLoading, setStatusDialogLoading] = useState(false);
+  const noteRef = useRef<HTMLTextAreaElement>(null);
+
+  // Clean up any residual body styles left by @base-ui/react after dialog close.
+  const anyDialogOpen = deleteOpen || statusDialogOpen;
+  useEffect(() => {
+    if (!anyDialogOpen) {
+      const raf = requestAnimationFrame(() => {
+        document.body.style.overflow = "";
+      });
+      const timer = setTimeout(() => {
+        document.body.style.pointerEvents = "";
+        document.body.style.overflow = "";
+      }, 150);
+      return () => { cancelAnimationFrame(raf); clearTimeout(timer); };
+    }
+  }, [anyDialogOpen]);
 
   const role = session?.user?.role;
   const userId = session?.user?.id;
@@ -179,9 +247,27 @@ export default function OrderDetailPage() {
     enabled: !!id,
   });
 
+  const canShip = role === "ADMIN" || role === "SHIPPING";
+
+  const { data: shippingCompanies = [] } = useQuery<ShippingCompany[]>({
+    queryKey: ["lookup-shipping-companies"],
+    queryFn: () => fetch("/api/lookup/shipping-companies").then((r) => r.json()).then((r) => r.data),
+    enabled: canShip,
+    staleTime: 5 * 60_000,
+  });
+
+  const { data: shippingStatuses = [] } = useQuery<ShippingStatusItem[]>({
+    queryKey: ["lookup-shipping-statuses"],
+    queryFn: () => fetch("/api/lookup/shipping-statuses").then((r) => r.json()).then((r) => r.data),
+    enabled: canShip,
+    staleTime: 5 * 60_000,
+  });
+
   // ── Merge timeline ──
+  // NOTE_ADDED audit entries are filtered out — notes already appear as dedicated "note" entries
+  // from the followUpNotes query, so showing them twice would create duplicates.
   const timeline: TimelineEntry[] = [
-    ...auditLogs.map((d): TimelineEntry => ({ type: "audit", data: d })),
+    ...auditLogs.filter((d) => d.action !== "NOTE_ADDED").map((d): TimelineEntry => ({ type: "audit", data: d })),
     ...followUpNotes.map((d): TimelineEntry => ({ type: "note", data: d })),
   ].sort((a, b) => {
     const aDate = a.type === "audit" ? new Date(a.data.changedAt) : new Date(a.data.createdAt);
@@ -213,11 +299,53 @@ export default function OrderDetailPage() {
     },
     onSuccess: () => {
       setNoteText("");
+      setNoteExpanded(false);
       queryClient.invalidateQueries({ queryKey: ["order-followup", id] });
+      queryClient.invalidateQueries({ queryKey: ["order-audit", id] });
       toast.success("تمت إضافة الملاحظة");
     },
     onError: (e: Error) => toast.error(e.message),
   });
+
+  const handleShippingStatusSubmit = async (
+    subStatusId: string,
+    shippingCompanyId?: string,
+    trackingNumber?: string,
+  ) => {
+    setStatusDialogLoading(true);
+    try {
+      const res = await fetch("/api/shipping/bulk-update", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          orderIds: [id],
+          subStatusId,
+          ...(shippingCompanyId && { shippingCompanyId }),
+          ...(trackingNumber?.trim() && { trackingNumber: trackingNumber.trim() }),
+        }),
+      });
+      const json: { data?: { updatedCount: number; errors: { orderId: string; message: string }[] }; error?: string } =
+        await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(json.error ?? "فشل تحديث حالة الشحن");
+        return;
+      }
+      const firstError = json.data?.errors?.[0];
+      if (firstError) {
+        toast.error(firstError.message);
+        return;
+      }
+      toast.success("تم تحديث حالة الشحن");
+      setStatusDialogOpen(false);
+      queryClient.invalidateQueries({ queryKey: ["order", id] });
+      queryClient.invalidateQueries({ queryKey: ["order-audit", id] });
+      queryClient.invalidateQueries({ queryKey: ["shipping-all"] });
+    } catch {
+      toast.error("حدث خطأ في الاتصال");
+    } finally {
+      setStatusDialogLoading(false);
+    }
+  };
 
   if (orderLoading) {
     return (
@@ -243,9 +371,11 @@ export default function OrderDetailPage() {
     );
   }
 
-  const canEdit = role === "ADMIN" || (role === "SALES" && userId === order.createdBy.id && order.status.name === "جاهز للشحن");
-  const canDelete = role === "ADMIN";
-  const canAddNote = role === "ADMIN" || role === "FOLLOWUP";
+  const visibleActions = new Set(role ? (ROLE_ACTIONS[role] ?? []) : []);
+  const canEdit    = visibleActions.has("edit") &&
+                     (role !== "SALES" || (userId === order.createdBy.id && order.status.name === "جاهز للشحن"));
+  const canDelete  = visibleActions.has("delete");
+  const canAddNote = visibleActions.has("comment");
 
   return (
     <div className="p-6 space-y-6" dir="rtl">
@@ -281,13 +411,24 @@ export default function OrderDetailPage() {
         </div>
         <div className="flex items-center gap-2">
           {canEdit && (
-            <Button variant="outline" onClick={() => router.push(`/orders/${id}/edit`)}>
-              تعديل
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="gap-1.5 border-blue-500/40 text-blue-600 hover:bg-blue-50 hover:text-blue-700 hover:border-blue-500/70 dark:text-blue-400 dark:border-blue-500/40 dark:hover:bg-blue-950 transition-all duration-150 hover:-translate-y-px hover:shadow-sm active:translate-y-0"
+              onClick={() => router.push(`/orders/${id}/edit`)}
+            >
+              <Pencil className="h-4 w-4" />
+              تعديل الطلب
             </Button>
           )}
           {canDelete && (
-            <Button variant="outline" className="text-destructive hover:text-destructive border-destructive/30"
-              onClick={() => setDeleteOpen(true)}>
+            <Button
+              type="button"
+              variant="outline"
+              className="text-destructive hover:text-destructive border-destructive/30 transition-all duration-150 hover:-translate-y-px hover:shadow-sm active:translate-y-0"
+              onClick={() => setDeleteOpen(true)}
+            >
               <Trash2 className="h-4 w-4" />
             </Button>
           )}
@@ -439,19 +580,38 @@ export default function OrderDetailPage() {
                 </div>
                 <div>
                   <p className="text-muted-foreground">رقم التتبع</p>
-                  {order.shippingInfo.shippingCompany.trackingUrl ? (
-                    <a
-                      href={order.shippingInfo.shippingCompany.trackingUrl.replace("{tracking}", order.shippingInfo.trackingNumber)}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="font-medium text-primary hover:underline font-mono"
-                    >
-                      {order.shippingInfo.trackingNumber}
-                    </a>
+                  {order.shippingInfo.trackingNumber ? (
+                    order.shippingInfo.shippingCompany.trackingUrl ? (
+                      <a
+                        href={order.shippingInfo.shippingCompany.trackingUrl.replace("{tracking}", order.shippingInfo.trackingNumber)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="font-medium text-primary hover:underline font-mono"
+                      >
+                        {order.shippingInfo.trackingNumber}
+                      </a>
+                    ) : (
+                      <p className="font-medium font-mono">{order.shippingInfo.trackingNumber}</p>
+                    )
                   ) : (
-                    <p className="font-medium font-mono">{order.shippingInfo.trackingNumber}</p>
+                    <p className="text-muted-foreground">—</p>
                   )}
                 </div>
+                {order.shippingInfo.shippingSubStatus && (
+                  <div>
+                    <p className="text-muted-foreground">حالة الشحن</p>
+                    <span
+                      className="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium border"
+                      style={{
+                        backgroundColor: (order.shippingInfo.shippingSubStatus.colorOverride ?? order.shippingInfo.shippingSubStatus.primary.color) + "22",
+                        color: order.shippingInfo.shippingSubStatus.colorOverride ?? order.shippingInfo.shippingSubStatus.primary.color,
+                        borderColor: (order.shippingInfo.shippingSubStatus.colorOverride ?? order.shippingInfo.shippingSubStatus.primary.color) + "55",
+                      }}
+                    >
+                      {order.shippingInfo.shippingSubStatus.name}
+                    </span>
+                  </div>
+                )}
                 <div>
                   <p className="text-muted-foreground">حالة الطلب</p>
                   <span className="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium border" style={{ backgroundColor: order.status.color + "22", color: order.status.color, borderColor: order.status.color + "55" }}>
@@ -492,31 +652,79 @@ export default function OrderDetailPage() {
                 السجل والمتابعة
               </CardTitle>
             </CardHeader>
-            <CardContent className="space-y-4">
-              {/* Add Note Form */}
-              {canAddNote && (
-                <div className="space-y-2">
-                  <Textarea
-                    value={noteText}
-                    onChange={(e) => setNoteText(e.target.value)}
-                    placeholder="أضف ملاحظة متابعة..."
-                    rows={3}
-                    className="text-sm"
-                  />
+            <CardContent className="space-y-3">
+              {/* ── Action buttons ──────────────────────────────────── */}
+              <div className="space-y-2">
+                {canShip && (
                   <Button
+                    type="button"
                     size="sm"
-                    className="w-full"
-                    disabled={!noteText.trim() || noteMutation.isPending}
-                    onClick={() => noteMutation.mutate(noteText)}
+                    className="w-full gap-1.5 transition-all duration-150 hover:-translate-y-px hover:shadow-sm active:translate-y-0"
+                    onClick={(e) => { e.preventDefault(); setStatusDialogOpen(true); }}
                   >
-                    {noteMutation.isPending ? <Loader2 className="h-3 w-3 animate-spin ml-1" /> : null}
-                    إضافة ملاحظة
+                    <Truck className="h-3.5 w-3.5" />
+                    تحديث حالة الشحن
                   </Button>
+                )}
+                {canAddNote && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="w-full gap-1.5 border-violet-500/40 text-violet-600 hover:bg-violet-50 hover:text-violet-700 hover:border-violet-500/70 dark:text-violet-400 dark:border-violet-500/40 dark:hover:bg-violet-950 transition-all duration-150 hover:-translate-y-px hover:shadow-sm active:translate-y-0"
+                    onClick={() => {
+                      setNoteExpanded(true);
+                      setTimeout(() => noteRef.current?.focus(), 50);
+                    }}
+                  >
+                    <MessageSquare className="h-3.5 w-3.5" />
+                    تعليق على الطلب
+                  </Button>
+                )}
+              </div>
+
+              {/* ── Inline note form (revealed on demand) ───────────── */}
+              {canAddNote && noteExpanded && (
+                <>
                   <Separator />
-                </div>
+                  <div className="space-y-2">
+                    <Textarea
+                      ref={noteRef}
+                      value={noteText}
+                      onChange={(e) => setNoteText(e.target.value)}
+                      placeholder="أضف ملاحظة متابعة..."
+                      rows={3}
+                      className="text-sm"
+                    />
+                    <div className="flex gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="flex-1 transition-all duration-150 hover:-translate-y-px hover:shadow-sm active:translate-y-0"
+                        disabled={noteMutation.isPending}
+                        onClick={() => { setNoteExpanded(false); setNoteText(""); }}
+                      >
+                        إلغاء
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        className="flex-1 transition-all duration-150 hover:-translate-y-px hover:shadow-sm active:translate-y-0"
+                        disabled={!noteText.trim() || noteMutation.isPending}
+                        onClick={() => noteMutation.mutate(noteText)}
+                      >
+                        {noteMutation.isPending && <Loader2 className="h-3 w-3 animate-spin ml-1" />}
+                        إضافة ملاحظة
+                      </Button>
+                    </div>
+                  </div>
+                </>
               )}
 
-              {/* Timeline List */}
+              <Separator />
+
+              {/* ── Timeline ────────────────────────────────────────── */}
               <div className="space-y-4 max-h-[600px] overflow-y-auto">
                 {timeline.length === 0 ? (
                   <p className="text-sm text-muted-foreground text-center py-4">لا يوجد سجل بعد</p>
@@ -543,6 +751,20 @@ export default function OrderDetailPage() {
         loading={deleteMutation.isPending}
         onConfirm={() => deleteMutation.mutate()}
       />
+
+      {/* Shipping status dialog — same component/API as shipping board single-order flow */}
+      {statusDialogOpen && (
+        <ShippingStatusDialog
+          orderIds={[order.id]}
+          statuses={shippingStatuses}
+          companies={shippingCompanies}
+          open={statusDialogOpen}
+          loading={statusDialogLoading}
+          requiresCompany={!order.shippingInfo}
+          onClose={() => { if (!statusDialogLoading) setStatusDialogOpen(false); }}
+          onSubmit={handleShippingStatusSubmit}
+        />
+      )}
     </div>
   );
 }

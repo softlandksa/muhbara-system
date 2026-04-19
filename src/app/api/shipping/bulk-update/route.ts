@@ -9,6 +9,7 @@ const bulkUpdateSchema = z.object({
   orderIds:          z.array(z.string().min(1)).min(1, "يجب تحديد طلب واحد على الأقل"),
   subStatusId:       z.string().min(1, "الحالة مطلوبة"),
   shippingCompanyId: z.string().min(1).optional(),
+  trackingNumber:    z.string().optional(),
 });
 
 export async function POST(request: NextRequest) {
@@ -34,7 +35,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const { orderIds, subStatusId, shippingCompanyId } = parsed.data;
+  const { orderIds, subStatusId, shippingCompanyId, trackingNumber } = parsed.data;
 
   const [sub, shippingCompany] = await Promise.all([
     prisma.shippingStatusSub.findUnique({
@@ -83,6 +84,21 @@ export async function POST(request: NextRequest) {
               shippingSubStatusId: subStatusId,
               ...(isDelivered && { deliveredAt: now }),
               ...(shippingCompanyId && { shippingCompanyId }),
+              // Only overwrite trackingNumber when the caller explicitly provides a non-empty value.
+              ...(trackingNumber?.trim() && { trackingNumber: trackingNumber.trim() }),
+            },
+          });
+        } else if (shippingCompanyId) {
+          // Order has no shipping record yet — create one now (first-time shipping via status dialog).
+          await tx.shippingInfo.create({
+            data: {
+              orderId,
+              shippingCompanyId,
+              shippingSubStatusId: subStatusId,
+              shippedAt: now,
+              shippedById: userId,
+              ...(isDelivered && { deliveredAt: now }),
+              ...(trackingNumber?.trim() && { trackingNumber: trackingNumber.trim() }),
             },
           });
         }

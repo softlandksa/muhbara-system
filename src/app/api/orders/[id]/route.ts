@@ -17,6 +17,9 @@ const fullOrderInclude = {
     include: {
       shippingCompany: true,
       shippedBy: { select: { id: true, name: true } },
+      shippingSubStatus: {
+        include: { primary: { select: { id: true, name: true, color: true } } },
+      },
     },
   },
   followUpNotes: {

@@ -57,7 +57,10 @@
       "Bash(taskkill /PID 13936 /F)",
       "Bash(taskkill //PID 13936 //F)",
       "Bash(taskkill //IM node.exe //F)",
-      "Bash(xargs ls *)"
+      "Bash(xargs ls *)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)"
     ]
   }
 }

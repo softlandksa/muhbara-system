@@ -6,7 +6,9 @@ import { prisma } from "@/lib/prisma";
 import { logActivity } from "@/lib/activity-log";
 
 const updateSchema = z.object({
-  subStatusId: z.string().min(1, "الحالة مطلوبة"),
+  subStatusId:       z.string().min(1, "الحالة مطلوبة"),
+  shippingCompanyId: z.string().optional(),
+  trackingNumber:    z.string().optional(),
 });
 
 export async function PUT(
@@ -38,7 +40,7 @@ export async function PUT(
     );
   }
 
-  const { subStatusId } = parsed.data;
+  const { subStatusId, shippingCompanyId, trackingNumber } = parsed.data;
 
   const shippingInfo = await prisma.shippingInfo.findUnique({
     where: { id },
@@ -61,6 +63,8 @@ export async function PUT(
       where: { id },
       data: {
         shippingSubStatusId: subStatusId,
+        ...(shippingCompanyId && { shippingCompanyId }),
+        ...(trackingNumber !== undefined && { trackingNumber: trackingNumber.trim() || null }),
         ...(isDelivered && { deliveredAt: new Date() }),
       },
       include: {

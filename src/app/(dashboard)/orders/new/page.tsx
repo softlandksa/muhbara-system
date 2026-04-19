@@ -516,6 +516,7 @@ export default function NewOrderPage() {
                 <Label>تاريخ الطلب</Label>
                 <Popover open={dateOpen} onOpenChange={setDateOpen}>
                   <PopoverTrigger
+                    type="button"
                     className={cn(
                       "flex h-9 w-full items-center justify-between rounded-lg border border-input bg-transparent px-3 py-2 text-sm shadow-xs hover:bg-accent",
                       errors.orderDate && "border-destructive"

@@ -6,7 +6,7 @@ import { useSession } from "next-auth/react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { arSA } from "date-fns/locale";
-import { Loader2, Truck, ExternalLink, RefreshCw, CheckSquare } from "lucide-react";
+import { Loader2, Truck, ExternalLink, RefreshCw, CheckSquare, Pencil } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -101,7 +101,6 @@ function ShipDialog({
 
   const validate = () => {
     const e: Record<string, string> = {};
-    if (!companyId) e.company = "شركة الشحن مطلوبة";
     if (!subStatusId) e.status = "حالة الشحن مطلوبة";
     setErrors(e);
     return Object.keys(e).length === 0;
@@ -144,18 +143,16 @@ function ShipDialog({
         </DialogHeader>
         <div className="space-y-4">
           <div className="space-y-1.5">
-            <Label>شركة الشحن</Label>
+            <Label>شركة الشحن <span className="text-muted-foreground text-xs">(اختياري)</span></Label>
             <SearchableSelect
               options={companies.map((c) => ({ value: c.id, label: c.name }))}
               value={companyId}
               onChange={setCompanyId}
               placeholder="اختر شركة الشحن"
-              error={!!errors.company}
             />
-            {errors.company && <p className="text-xs text-destructive">{errors.company}</p>}
           </div>
           <div className="space-y-1.5">
-            <Label>حالة الشحن</Label>
+            <Label>حالة الشحن <span className="text-destructive">*</span></Label>
             <SearchableSelect
               options={statuses.flatMap((p) =>
                 p.subs.map((s) => ({
@@ -191,10 +188,134 @@ function ShipDialog({
           </div>
         </div>
         <DialogFooter className="gap-2">
-          <Button variant="outline" onClick={handleClose} disabled={loading}>إلغاء</Button>
-          <Button onClick={handleSubmit} disabled={loading}>
+          <Button type="button" variant="outline" onClick={handleClose} disabled={loading}>إلغاء</Button>
+          <Button type="button" onClick={handleSubmit} disabled={loading}>
             {loading ? <Loader2 className="h-4 w-4 animate-spin ml-1" /> : <Truck className="h-4 w-4 ml-1" />}
             تأكيد الشحن
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ─── Edit Ship Dialog ─────────────────────────────────────────────────────────
+
+function EditShipDialog({
+  order,
+  companies,
+  statuses,
+  open,
+  onClose,
+  onDone,
+}: {
+  order: UnifiedOrder | null;
+  companies: ShippingCompany[];
+  statuses: ShippingStatusItem[];
+  open: boolean;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [companyId, setCompanyId] = useState("");
+  const [subStatusId, setSubStatusId] = useState("");
+  const [tracking, setTracking] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    if (open && order?.shippingInfo) {
+      setCompanyId(order.shippingInfo.shippingCompany.id);
+      setSubStatusId(order.shippingInfo.shippingSubStatus?.id ?? "");
+      setTracking(order.shippingInfo.trackingNumber ?? "");
+      setErrors({});
+    }
+  }, [open, order]);
+
+  const reset = () => { setCompanyId(""); setSubStatusId(""); setTracking(""); setErrors({}); };
+  const handleClose = () => { if (loading) return; reset(); onClose(); };
+
+  const validate = () => {
+    const e: Record<string, string> = {};
+    if (!subStatusId) e.status = "حالة الشحن مطلوبة";
+    setErrors(e);
+    return Object.keys(e).length === 0;
+  };
+
+  const handleSubmit = async () => {
+    if (!order?.shippingInfo || !validate()) return;
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/shipping/${order.shippingInfo.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          subStatusId,
+          ...(companyId && { shippingCompanyId: companyId }),
+          trackingNumber: tracking.trim() || undefined,
+        }),
+      });
+      let json: { error?: string } = {};
+      try { json = await res.json(); } catch { /* non-JSON */ }
+      if (!res.ok) { toast.error(json.error ?? "فشل تحديث الشحن"); return; }
+      toast.success("تم تحديث بيانات الشحن");
+      reset();
+      onDone();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "حدث خطأ في الاتصال");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && handleClose()}>
+      <DialogContent dir="rtl" className="max-w-md relative">
+        <AppLoadingOverlay open={loading} mode="inline" message="جاري تحديث الشحن..." />
+        <DialogHeader>
+          <DialogTitle>تعديل بيانات الشحن — {order?.orderNumber}</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="space-y-1.5">
+            <Label>شركة الشحن <span className="text-muted-foreground text-xs">(اختياري)</span></Label>
+            <SearchableSelect
+              options={companies.map((c) => ({ value: c.id, label: c.name }))}
+              value={companyId}
+              onChange={setCompanyId}
+              placeholder="شركة الشحن"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label>حالة الشحن <span className="text-destructive">*</span></Label>
+            <SearchableSelect
+              options={statuses.flatMap((p) =>
+                p.subs.map((s) => ({
+                  value: s.id,
+                  label: `${p.name} — ${s.name}`,
+                  group: p.name,
+                }))
+              )}
+              value={subStatusId}
+              onChange={setSubStatusId}
+              placeholder="اختر حالة الشحن"
+              error={!!errors.status}
+            />
+            {errors.status && <p className="text-xs text-destructive">{errors.status}</p>}
+          </div>
+          <div className="space-y-1.5">
+            <Label>رقم التتبع (اختياري)</Label>
+            <Input
+              value={tracking}
+              onChange={(e) => setTracking(e.target.value)}
+              placeholder="رقم التتبع"
+              dir="ltr"
+            />
+          </div>
+        </div>
+        <DialogFooter className="gap-2">
+          <Button type="button" variant="outline" onClick={handleClose} disabled={loading}>إلغاء</Button>
+          <Button type="button" onClick={handleSubmit} disabled={!subStatusId || loading}>
+            {loading ? <Loader2 className="h-4 w-4 animate-spin ml-1" /> : <Pencil className="h-4 w-4 ml-1" />}
+            حفظ التعديلات
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -534,6 +655,7 @@ export default function ShippingPage() {
 
   const [activeTab, setActiveTab] = useState("all");
   const [shipTarget, setShipTarget] = useState<UnifiedOrder | null>(null);
+  const [editTarget, setEditTarget] = useState<UnifiedOrder | null>(null);
   const [statusTarget, setStatusTarget] = useState<UnifiedOrder | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkShipOpen, setBulkShipOpen] = useState(false);
@@ -547,7 +669,7 @@ export default function ShippingPage() {
 
   // Safety: @base-ui leaves pointer-events:none on body during dialog close.
   // Use a 200ms timeout (longer than any animation) so this always runs after base-ui cleans up.
-  const anyDialogOpen = !!shipTarget || !!statusTarget || bulkShipOpen || bulkStatusOpen || bulkLoading;
+  const anyDialogOpen = !!shipTarget || !!editTarget || !!statusTarget || bulkShipOpen || bulkStatusOpen || bulkLoading;
   useEffect(() => {
     if (!anyDialogOpen) {
       const timer = setTimeout(() => {
@@ -575,6 +697,11 @@ export default function ShippingPage() {
     enabled: isAllowed,
     staleTime: 5 * 60_000,
   });
+
+  const readyToShipId = useMemo(
+    () => shippingStatuses.find((s) => s.name === "جاهز للشحن")?.id ?? null,
+    [shippingStatuses]
+  );
 
   // ── All orders — single unified query ──
   const { data: allOrders = [], isLoading, refetch } = useQuery<UnifiedOrder[]>({
@@ -652,7 +779,9 @@ export default function ShippingPage() {
 
   // ── Derived from selection ──
   const selectedOrders = filteredOrders.filter((o) => selected.has(o.id));
-  const selectedReadyOrders = selectedOrders.filter((o) => o.status.name === "جاهز للشحن");
+  const selectedReadyOrders = readyToShipId
+    ? selectedOrders.filter((o) => o.status.id === readyToShipId)
+    : [];
 
   // ── Post-action invalidation ──
   const invalidateAll = () => {
@@ -715,6 +844,11 @@ export default function ShippingPage() {
     } finally {
       setBulkLoading(false);
     }
+  };
+
+  const handleEditDone = () => {
+    setEditTarget(null);
+    invalidateAll();
   };
 
   const handleStatusDone = () => {
@@ -986,40 +1120,53 @@ export default function ShippingPage() {
 
                   {/* Actions — sticky left keeps buttons visible when table overflows in RTL */}
                   <TableCell
-                    className="sticky left-0 z-[1] bg-card"
+                    className="sticky left-0 z-20 bg-card"
                     onClick={(e) => e.stopPropagation()}
                   >
                     {order.shippingInfo ? (
-                      <div className="flex items-center gap-1.5 min-w-[9rem]">
+                      <div className="flex items-center gap-1 min-w-[10rem]">
                         {rowLoadingId === order.shippingInfo.id ? (
                           <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
                         ) : (
-                          <select
-                            dir="rtl"
-                            className="w-full text-xs rounded-md border border-input bg-background px-2 py-1.5 text-foreground shadow-sm focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
-                            value={order.shippingInfo.shippingSubStatus?.id ?? ""}
-                            onChange={(e) => {
-                              e.stopPropagation();
-                              const subStatusId = e.target.value;
-                              if (!subStatusId || !order.shippingInfo) return;
-                              handleRowStatusChange(order.shippingInfo.id, subStatusId);
-                            }}
-                          >
-                            {!order.shippingInfo.shippingSubStatus && (
-                              <option value="" disabled>اختر الحالة</option>
-                            )}
-                            {shippingStatuses.flatMap((p) =>
-                              p.subs.map((s) => (
-                                <option key={s.id} value={s.id}>
-                                  {p.name} — {s.name}
-                                </option>
-                              ))
-                            )}
-                          </select>
+                          <>
+                            <select
+                              dir="rtl"
+                              className="flex-1 min-w-0 text-xs rounded-md border border-input bg-background px-2 py-1.5 text-foreground shadow-sm focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
+                              value={order.shippingInfo.shippingSubStatus?.id ?? ""}
+                              onChange={(e) => {
+                                e.stopPropagation();
+                                const subStatusId = e.target.value;
+                                if (!subStatusId || !order.shippingInfo) return;
+                                handleRowStatusChange(order.shippingInfo.id, subStatusId);
+                              }}
+                            >
+                              {!order.shippingInfo.shippingSubStatus && (
+                                <option value="" disabled>اختر الحالة</option>
+                              )}
+                              {shippingStatuses.flatMap((p) =>
+                                p.subs.map((s) => (
+                                  <option key={s.id} value={s.id}>
+                                    {p.name} — {s.name}
+                                  </option>
+                                ))
+                              )}
+                            </select>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7 shrink-0"
+                              title="تعديل بيانات الشحن"
+                              onClick={(e) => { e.stopPropagation(); setEditTarget(order); }}
+                            >
+                              <Pencil className="h-3.5 w-3.5" />
+                            </Button>
+                          </>
                         )}
                       </div>
-                    ) : order.status.name === "جاهز للشحن" ? (
+                    ) : readyToShipId && order.status.id === readyToShipId ? (
                       <Button
+                        type="button"
                         size="sm"
                         onClick={(e) => { e.stopPropagation(); setShipTarget(order); }}
                         className="gap-1 whitespace-nowrap"
@@ -1048,6 +1195,18 @@ export default function ShippingPage() {
           open={!!shipTarget}
           onClose={() => setShipTarget(null)}
           onShipped={handleShipped}
+        />
+      )}
+
+      {/* Edit Ship Dialog */}
+      {editTarget && (
+        <EditShipDialog
+          order={editTarget}
+          companies={companies}
+          statuses={shippingStatuses}
+          open={!!editTarget}
+          onClose={() => setEditTarget(null)}
+          onDone={handleEditDone}
         />
       )}
 

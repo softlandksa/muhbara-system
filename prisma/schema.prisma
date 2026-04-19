@@ -6,104 +6,73 @@ datasource db {
   provider = "postgresql"
 }
 
-enum Role {
-  ADMIN
-  GENERAL_MANAGER
-  SALES_MANAGER
-  SALES
-  SUPPORT
-  SHIPPING
-  FOLLOWUP
-  HR
-}
-
-enum CommissionType {
-  FIXED
-  PERCENTAGE
-}
-
-enum CommissionStatus {
-  PENDING
-  APPROVED
-  PAID
-}
-
-enum NotificationType {
-  ORDER_STATUS
-  NEW_REPORT
-  COMMISSION
-  SYSTEM
-}
-
 model User {
-  id           String  @id @default(cuid())
-  name         String
-  email        String  @unique
-  passwordHash String
-  role         Role    @default(SALES)
-  teamId       String?
-  team         Team?   @relation("TeamMembers", fields: [teamId], references: [id])
-  isActive     Boolean @default(true)
-  avatar       String?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-
-  managedTeams        Team[]           @relation("TeamManager")
+  id                  String           @id @default(cuid())
+  name                String
+  email               String           @unique
+  passwordHash        String
+  role                Role             @default(SALES)
+  teamId              String?
+  isActive            Boolean          @default(true)
+  avatar              String?
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+  activityLogs        ActivityLog[]
+  approvedCommissions Commission[]     @relation("CommissionApprover")
+  commissions         Commission[]
+  dailyReports        DailyReport[]
+  employeeTargets     EmployeeTarget[]
+  followUpNotes       FollowUpNote[]
+  notifications       Notification[]
   orders              Order[]          @relation("OrderCreator")
   auditLogs           OrderAuditLog[]
   shippingActions     ShippingInfo[]
-  followUpNotes       FollowUpNote[]
-  dailyReports        DailyReport[]
-  commissions         Commission[]
-  notifications       Notification[]
-  activityLogs        ActivityLog[]
-  approvedCommissions Commission[]     @relation("CommissionApprover")
+  managedTeams        Team[]           @relation("TeamManager")
+  team                Team?            @relation("TeamMembers", fields: [teamId], references: [id])
   userTargets         UserTarget[]
-  employeeTargets     EmployeeTarget[]
 }
 
 model Team {
   id        String   @id @default(cuid())
   name      String   @unique
   managerId String
+  createdAt DateTime @default(now())
+  orders    Order[]
   manager   User     @relation("TeamManager", fields: [managerId], references: [id])
   members   User[]   @relation("TeamMembers")
-  orders    Order[]
-  createdAt DateTime @default(now())
 }
 
 model Order {
-  id              String                @id @default(cuid())
-  orderNumber     String                @unique
-  orderDate       DateTime              @default(now())
-  customerName    String
-  phone           String
-  address         String
-  countryId       String
-  country         Country               @relation(fields: [countryId], references: [id])
-  currencyId      String
-  currency        Currency              @relation(fields: [currencyId], references: [id])
-  paymentMethodId String
-  paymentMethod   PaymentMethod         @relation(fields: [paymentMethodId], references: [id])
-  statusId        String
-  status          ShippingStatusPrimary @relation(fields: [statusId], references: [id])
-  totalAmount     Float          @default(0)
+  id                 String                @id @default(cuid())
+  orderNumber        String                @unique
+  orderDate          DateTime              @default(now())
+  customerName       String
+  phone              String
+  address            String
+  countryId          String
+  currencyId         String
+  paymentMethodId    String
+  totalAmount        Float                 @default(0)
   notes              String?
-  isRepeatCustomer   Boolean      @default(false)
-  repeatCustomerNote String?
   createdById        String
-  createdBy       User           @relation("OrderCreator", fields: [createdById], references: [id])
-  teamId          String?
-  team            Team?          @relation(fields: [teamId], references: [id])
-  createdAt       DateTime       @default(now())
-  updatedAt       DateTime       @updatedAt
-  deletedAt       DateTime?
-
-  items         OrderItem[]
-  auditLogs     OrderAuditLog[]
-  shippingInfo  ShippingInfo?
-  followUpNotes FollowUpNote[]
-  notifications Notification[]
+  teamId             String?
+  createdAt          DateTime              @default(now())
+  updatedAt          DateTime              @updatedAt
+  deletedAt          DateTime?
+  isRepeatCustomer   Boolean               @default(false)
+  repeatCustomerNote String?
+  statusId           String
+  followUpNotes      FollowUpNote[]
+  notifications      Notification[]
+  country            Country               @relation(fields: [countryId], references: [id])
+  createdBy          User                  @relation("OrderCreator", fields: [createdById], references: [id])
+  currency           Currency              @relation(fields: [currencyId], references: [id])
+  paymentMethod      PaymentMethod         @relation(fields: [paymentMethodId], references: [id])
+  status             ShippingStatusPrimary @relation(fields: [statusId], references: [id])
+  team               Team?                 @relation(fields: [teamId], references: [id])
+  auditLogs          OrderAuditLog[]
+  items              OrderItem[]
+  shippingInfo       ShippingInfo?
 
   @@index([deletedAt])
   @@index([statusId])
@@ -124,13 +93,13 @@ model Order {
 model OrderItem {
   id         String   @id @default(cuid())
   orderId    String
-  order      Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
   productId  String
-  product    Product  @relation(fields: [productId], references: [id])
   quantity   Int
   unitPrice  Float
   totalPrice Float
   createdAt  DateTime @default(now())
+  order      Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product    Product  @relation(fields: [productId], references: [id])
 
   @@index([orderId])
   @@index([productId])
@@ -139,15 +108,15 @@ model OrderItem {
 model OrderAuditLog {
   id          String   @id @default(cuid())
   orderId     String
-  order       Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
   action      String
   fieldName   String?
   oldValue    String?
   newValue    String?
   changedById String
-  changedBy   User     @relation(fields: [changedById], references: [id])
   changedAt   DateTime @default(now())
   ipAddress   String?
+  changedBy   User     @relation(fields: [changedById], references: [id])
+  order       Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
   @@index([orderId])
   @@index([changedById])
@@ -157,16 +126,16 @@ model OrderAuditLog {
 model ShippingInfo {
   id                  String             @id @default(cuid())
   orderId             String             @unique
-  order               Order              @relation(fields: [orderId], references: [id], onDelete: Cascade)
   shippingCompanyId   String
-  shippingCompany     ShippingCompany    @relation(fields: [shippingCompanyId], references: [id])
   trackingNumber      String?
   shippedById         String
-  shippedBy           User               @relation(fields: [shippedById], references: [id])
   shippedAt           DateTime           @default(now())
   deliveredAt         DateTime?
   notes               String?
   shippingSubStatusId String?
+  order               Order              @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  shippedBy           User               @relation(fields: [shippedById], references: [id])
+  shippingCompany     ShippingCompany    @relation(fields: [shippingCompanyId], references: [id])
   shippingSubStatus   ShippingStatusSub? @relation(fields: [shippingSubStatusId], references: [id])
 
   @@index([shippingCompanyId])
@@ -178,11 +147,11 @@ model ShippingInfo {
 model FollowUpNote {
   id          String   @id @default(cuid())
   orderId     String
-  order       Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
   note        String
   createdById String
-  createdBy   User     @relation(fields: [createdById], references: [id])
   createdAt   DateTime @default(now())
+  createdBy   User     @relation(fields: [createdById], references: [id])
+  order       Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
   @@index([orderId])
   @@index([createdById])
@@ -206,10 +175,10 @@ model Currency {
   symbol          String
   isActive        Boolean          @default(true)
   deletedAt       DateTime?
-  orders          Order[]
-  commissionRules CommissionRule[]
   commissions     Commission[]
+  commissionRules CommissionRule[]
   employeeTargets EmployeeTarget[]
+  orders          Order[]
 }
 
 model PaymentMethod {
@@ -229,11 +198,6 @@ model ShippingCompany {
   shippingInfo ShippingInfo[]
 }
 
-// Two-tier order status system:
-//   ShippingStatusPrimary — top-level category (maps to existing "ShippingStatus" DB table)
-//   ShippingStatusSub     — specific sub-status under a primary
-// Order.statusId → ShippingStatusPrimary
-// ShippingInfo.shippingSubStatusId → ShippingStatusSub (records which sub was chosen)
 model ShippingStatusPrimary {
   id        String              @id @default(cuid())
   name      String              @unique
@@ -244,16 +208,14 @@ model ShippingStatusPrimary {
   orders    Order[]
   subs      ShippingStatusSub[]
 
-  @@map("ShippingStatus")
   @@index([isActive])
   @@index([sortOrder])
+  @@map("ShippingStatus")
 }
 
-// Sub-status under a primary. marksOrderDelivered drives deliveredAt stamping.
 model ShippingStatusSub {
   id                  String                @id @default(cuid())
   primaryId           String
-  primary             ShippingStatusPrimary @relation(fields: [primaryId], references: [id])
   name                String
   colorOverride       String?
   sortOrder           Int                   @default(0)
@@ -261,6 +223,7 @@ model ShippingStatusSub {
   deletedAt           DateTime?
   marksOrderDelivered Boolean               @default(false)
   shippingInfos       ShippingInfo[]
+  primary             ShippingStatusPrimary @relation(fields: [primaryId], references: [id])
 
   @@unique([primaryId, name])
   @@index([primaryId])
@@ -281,74 +244,65 @@ model Product {
 }
 
 model DailyReport {
-  id          String   @id @default(cuid())
-  userId      String
-  user        User     @relation(fields: [userId], references: [id])
-  reportDate  DateTime @db.Date
-  shiftStart  String?
-  shiftEnd    String?
-  reportData  Json?
-  notes       String?
-  createdAt   DateTime @default(now())
+  id         String   @id @default(cuid())
+  userId     String
+  reportDate DateTime @db.Date
+  notes      String?
+  createdAt  DateTime @default(now())
+  reportData Json?
+  shiftEnd   String?
+  shiftStart String?
+  user       User     @relation(fields: [userId], references: [id])
 
   @@unique([userId, reportDate])
   @@index([userId])
   @@index([reportDate])
 }
 
-// Commission tier: when deliveredOrders falls in [minOrders, maxOrders], apply this rule.
-// Ranges must be non-overlapping per (roleType, currencyId) combination.
-// PERCENTAGE base = employee's total delivered-order revenue in the period.
 model CommissionRule {
   id               String         @id @default(cuid())
   name             String
   roleType         Role
   minOrders        Int
-  maxOrders        Int?           // null = unlimited
+  maxOrders        Int?
   commissionAmount Float
   commissionType   CommissionType
   currencyId       String
-  currency         Currency       @relation(fields: [currencyId], references: [id])
   isActive         Boolean        @default(true)
   createdAt        DateTime       @default(now())
   commissions      Commission[]
+  currency         Currency       @relation(fields: [currencyId], references: [id])
 
   @@index([roleType, currencyId])
   @@index([isActive])
 }
 
-// Per-user monthly delivery target — purely for KPI display.
-// Does NOT affect commission amounts.
 model UserTarget {
   id           String   @id @default(cuid())
   userId       String
-  user         User     @relation(fields: [userId], references: [id])
   year         Int
-  month        Int      // 1–12
+  month        Int
   targetOrders Int
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
+  user         User     @relation(fields: [userId], references: [id])
 
   @@unique([userId, year, month])
 }
 
-// Flexible period-range target for the commission + targets reporting system.
-// Separate from UserTarget (which is calendar-month KPI only).
-// targetDeliveredOrderCount and/or targetRevenue can both be set independently.
-// Eligible roles: SALES, SHIPPING, FOLLOWUP, SALES_MANAGER, GENERAL_MANAGER.
 model EmployeeTarget {
   id                        String    @id @default(cuid())
   userId                    String
-  user                      User      @relation(fields: [userId], references: [id])
   periodStart               DateTime  @db.Date
   periodEnd                 DateTime  @db.Date
   targetDeliveredOrderCount Int?
   targetRevenue             Float?
   currencyId                String?
-  currency                  Currency? @relation(fields: [currencyId], references: [id])
   notes                     String?
   createdAt                 DateTime  @default(now())
   updatedAt                 DateTime  @updatedAt
+  currency                  Currency? @relation(fields: [currencyId], references: [id])
+  user                      User      @relation(fields: [userId], references: [id])
 
   @@unique([userId, periodStart, periodEnd])
   @@index([userId])
@@ -358,19 +312,19 @@ model EmployeeTarget {
 model Commission {
   id                   String           @id @default(cuid())
   userId               String
-  user                 User             @relation(fields: [userId], references: [id])
   periodStart          DateTime
   periodEnd            DateTime
   totalDeliveredOrders Int
   ruleId               String
-  rule                 CommissionRule   @relation(fields: [ruleId], references: [id])
   commissionAmount     Float
   currencyId           String
-  currency             Currency         @relation(fields: [currencyId], references: [id])
   status               CommissionStatus @default(PENDING)
   calculatedAt         DateTime         @default(now())
   approvedById         String?
   approvedBy           User?            @relation("CommissionApprover", fields: [approvedById], references: [id])
+  currency             Currency         @relation(fields: [currencyId], references: [id])
+  rule                 CommissionRule   @relation(fields: [ruleId], references: [id])
+  user                 User             @relation(fields: [userId], references: [id])
 
   @@index([userId])
   @@index([status])
@@ -381,14 +335,14 @@ model Commission {
 model Notification {
   id             String           @id @default(cuid())
   userId         String
-  user           User             @relation(fields: [userId], references: [id])
   title          String
   message        String
   type           NotificationType
   relatedOrderId String?
-  relatedOrder   Order?           @relation(fields: [relatedOrderId], references: [id])
   isRead         Boolean          @default(false)
   createdAt      DateTime         @default(now())
+  relatedOrder   Order?           @relation(fields: [relatedOrderId], references: [id])
+  user           User             @relation(fields: [userId], references: [id])
 
   @@index([userId])
   @@index([userId, isRead])
@@ -398,16 +352,45 @@ model Notification {
 model ActivityLog {
   id         String   @id @default(cuid())
   userId     String
-  user       User     @relation(fields: [userId], references: [id])
   action     String
   entityType String
   entityId   String?
   details    Json?
   ipAddress  String?
   createdAt  DateTime @default(now())
+  user       User     @relation(fields: [userId], references: [id])
 
   @@index([userId])
   @@index([entityType])
   @@index([createdAt])
   @@index([entityType, createdAt])
+}
+
+enum Role {
+  ADMIN
+  SALES_MANAGER
+  SALES
+  SHIPPING
+  FOLLOWUP
+  GENERAL_MANAGER
+  SUPPORT
+  HR
+}
+
+enum CommissionType {
+  FIXED
+  PERCENTAGE
+}
+
+enum CommissionStatus {
+  PENDING
+  APPROVED
+  PAID
+}
+
+enum NotificationType {
+  ORDER_STATUS
+  NEW_REPORT
+  COMMISSION
+  SYSTEM
 }

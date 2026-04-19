@@ -6,8 +6,9 @@ import { prisma } from "@/lib/prisma";
 import { logActivity } from "@/lib/activity-log";
 
 const bulkUpdateSchema = z.object({
-  orderIds:    z.array(z.string().min(1)).min(1, "يجب تحديد طلب واحد على الأقل"),
-  subStatusId: z.string().min(1, "الحالة مطلوبة"),
+  orderIds:          z.array(z.string().min(1)).min(1, "يجب تحديد طلب واحد على الأقل"),
+  subStatusId:       z.string().min(1, "الحالة مطلوبة"),
+  shippingCompanyId: z.string().min(1).optional(),
 });
 
 export async function POST(request: NextRequest) {
@@ -33,24 +34,34 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const { orderIds, subStatusId } = parsed.data;
+  const { orderIds, subStatusId, shippingCompanyId } = parsed.data;
 
-  const sub = await prisma.shippingStatusSub.findUnique({
-    where: { id: subStatusId },
-    include: { primary: true },
-  });
+  const [sub, shippingCompany] = await Promise.all([
+    prisma.shippingStatusSub.findUnique({
+      where: { id: subStatusId },
+      include: { primary: true },
+    }),
+    shippingCompanyId
+      ? prisma.shippingCompany.findUnique({ where: { id: shippingCompanyId } })
+      : Promise.resolve(null),
+  ]);
+
   if (!sub) {
     return NextResponse.json({ error: "الحالة غير موجودة" }, { status: 404 });
   }
+  if (shippingCompanyId && !shippingCompany) {
+    return NextResponse.json({ error: "شركة الشحن غير موجودة" }, { status: 404 });
+  }
 
   const isDelivered = sub.marksOrderDelivered;
+  const now = new Date();
 
   let updatedCount = 0;
   const errors: { orderId: string; message: string }[] = [];
 
-  for (const orderId of orderIds) {
-    try {
-      await prisma.$transaction(async (tx) => {
+  try {
+    await prisma.$transaction(async (tx) => {
+      for (const orderId of orderIds) {
         const order = await tx.order.findFirst({
           where: { id: orderId, deletedAt: null },
           include: {
@@ -58,21 +69,20 @@ export async function POST(request: NextRequest) {
             shippingInfo: { select: { id: true } },
           },
         });
-        if (!order) throw new Error("الطلب غير موجود");
+        if (!order) throw new Error(`الطلب ${orderId} غير موجود`);
 
-        // Update order's primary status
         await tx.order.update({
           where: { id: orderId },
           data: { statusId: sub.primaryId },
         });
 
-        // Update ShippingInfo sub-status and optionally deliveredAt
         if (order.shippingInfo) {
           await tx.shippingInfo.update({
             where: { id: order.shippingInfo.id },
             data: {
               shippingSubStatusId: subStatusId,
-              ...(isDelivered && { deliveredAt: new Date() }),
+              ...(isDelivered && { deliveredAt: now }),
+              ...(shippingCompanyId && { shippingCompanyId }),
             },
           });
         }
@@ -85,7 +95,7 @@ export async function POST(request: NextRequest) {
             oldValue:    order.status.name,
             newValue:    sub.name,
             changedById: userId,
-            changedAt:   new Date(),
+            changedAt:   now,
           },
         });
 
@@ -94,16 +104,20 @@ export async function POST(request: NextRequest) {
           action:     "UPDATE_ORDER_STATUS",
           entityType: "Order",
           entityId:   orderId,
-          details:    { subStatus: sub.name, primary: sub.primary.name, bulk: true },
+          details:    {
+            subStatus: sub.name,
+            primary:   sub.primary.name,
+            bulk:      true,
+            ...(shippingCompanyId && { shippingCompanyId, shippingCompanyName: shippingCompany?.name }),
+          },
         });
-      });
-      updatedCount++;
-    } catch (err) {
-      errors.push({
-        orderId,
-        message: err instanceof Error ? err.message : "خطأ غير متوقع",
-      });
-    }
+
+        updatedCount++;
+      }
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "خطأ غير متوقع";
+    errors.push({ orderId: "bulk", message });
   }
 
   return NextResponse.json({ data: { updatedCount, errors } });

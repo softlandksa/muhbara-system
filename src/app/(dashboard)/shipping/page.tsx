@@ -359,6 +359,7 @@ function BulkShipDialog({
 function BulkShippingStatusDialog({
   orderIds,
   statuses,
+  companies,
   open,
   loading,
   onClose,
@@ -366,27 +367,29 @@ function BulkShippingStatusDialog({
 }: {
   orderIds: string[];
   statuses: ShippingStatusItem[];
+  companies: ShippingCompany[];
   open: boolean;
   loading: boolean;
   onClose: () => void;
-  onSubmit: (subStatusId: string) => void;
+  onSubmit: (subStatusId: string, shippingCompanyId?: string) => void;
 }) {
   const [subStatusId, setSubStatusId] = useState("");
+  const [companyId, setCompanyId] = useState("");
 
-  // Reset status selection each time the dialog opens
+  // Reset selections each time the dialog opens
   useEffect(() => {
-    if (open) setSubStatusId("");
+    if (open) { setSubStatusId(""); setCompanyId(""); }
   }, [open]);
 
   const handleClose = () => {
     if (loading) return;
-    setSubStatusId("");
+    setSubStatusId(""); setCompanyId("");
     onClose();
   };
 
   const handleConfirm = () => {
     if (!subStatusId || orderIds.length === 0 || loading) return;
-    onSubmit(subStatusId);
+    onSubmit(subStatusId, companyId || undefined);
   };
 
   return (
@@ -395,20 +398,31 @@ function BulkShippingStatusDialog({
         <DialogHeader>
           <DialogTitle>تغيير حالة {orderIds.length} طلب</DialogTitle>
         </DialogHeader>
-        <div className="space-y-1.5">
-          <Label>الحالة الجديدة</Label>
-          <SearchableSelect
-            options={statuses.flatMap((p) =>
-              p.subs.map((s) => ({
-                value: s.id,
-                label: `${p.name} — ${s.name}`,
-                group: p.name,
-              }))
-            )}
-            value={subStatusId}
-            onChange={setSubStatusId}
-            placeholder="اختر حالة الشحن"
-          />
+        <div className="space-y-4">
+          <div className="space-y-1.5">
+            <Label>الحالة الجديدة <span className="text-destructive">*</span></Label>
+            <SearchableSelect
+              options={statuses.flatMap((p) =>
+                p.subs.map((s) => ({
+                  value: s.id,
+                  label: `${p.name} — ${s.name}`,
+                  group: p.name,
+                }))
+              )}
+              value={subStatusId}
+              onChange={setSubStatusId}
+              placeholder="اختر حالة الشحن"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label>شركة الشحن <span className="text-muted-foreground text-xs">(اختياري — يُغيّر شركة الشحن لجميع الطلبات المحددة)</span></Label>
+            <SearchableSelect
+              options={companies.map((c) => ({ value: c.id, label: c.name }))}
+              value={companyId}
+              onChange={setCompanyId}
+              placeholder="اتركه فارغاً للإبقاء على الشركة الحالية"
+            />
+          </div>
         </div>
         <DialogFooter className="gap-2">
           <Button type="button" variant="outline" onClick={handleClose} disabled={loading}>إلغاء</Button>
@@ -651,14 +665,18 @@ export default function ShippingPage() {
     setBulkStatusOpen(true);
   };
 
-  const handleBulkStatusSubmit = async (subStatusId: string) => {
+  const handleBulkStatusSubmit = async (subStatusId: string, shippingCompanyId?: string) => {
     if (bulkLoading || bulkSelectedIds.length === 0) return;
     setBulkLoading(true);
     try {
       const res = await fetch("/api/shipping/bulk-update", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ orderIds: bulkSelectedIds, subStatusId }),
+        body: JSON.stringify({
+          orderIds: bulkSelectedIds,
+          subStatusId,
+          ...(shippingCompanyId && { shippingCompanyId }),
+        }),
       });
       let json: { error?: string; data?: { updatedCount: number; errors: { orderId: string; message: string }[] } } = {};
       try { json = await res.json(); } catch { /* non-JSON fallback */ }
@@ -979,6 +997,7 @@ export default function ShippingPage() {
       <BulkShippingStatusDialog
         orderIds={bulkSelectedIds}
         statuses={shippingStatuses}
+        companies={companies}
         open={bulkStatusOpen}
         loading={bulkLoading}
         onClose={() => { if (!bulkLoading) setBulkStatusOpen(false); }}

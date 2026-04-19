@@ -56,7 +56,8 @@
       "Bash(curl *)",
       "Bash(taskkill /PID 13936 /F)",
       "Bash(taskkill //PID 13936 //F)",
-      "Bash(taskkill //IM node.exe //F)"
+      "Bash(taskkill //IM node.exe //F)",
+      "Bash(xargs ls *)"
     ]
   }
 }

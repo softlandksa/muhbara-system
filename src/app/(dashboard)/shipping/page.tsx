@@ -537,12 +537,15 @@ export default function ShippingPage() {
   const [bulkLoading, setBulkLoading] = useState(false);
   const [bulkSelectedIds, setBulkSelectedIds] = useState<string[]>([]);
 
-  // Safety: clean up any pointer-events:none @base-ui may leave on body after dialog closes
+  // Safety: @base-ui may leave pointer-events:none or overflow:hidden on body after a modal closes.
+  // This effect fires whenever ANY dialog fully closes and resets those inline styles.
+  const anyDialogOpen = !!shipTarget || !!statusTarget || bulkShipOpen || bulkStatusOpen || bulkLoading;
   useEffect(() => {
-    if (!bulkStatusOpen && !bulkLoading) {
+    if (!anyDialogOpen) {
       document.body.style.pointerEvents = "";
+      document.body.style.overflow = "";
     }
-  }, [bulkStatusOpen, bulkLoading]);
+  }, [anyDialogOpen]);
 
   const role = session?.user?.role;
   const isAllowed = role === "ADMIN" || role === "SHIPPING";
@@ -819,7 +822,7 @@ export default function ShippingPage() {
               <TableHead>المبلغ</TableHead>
               <TableHead>المنشئ</TableHead>
               <TableHead>التاريخ</TableHead>
-              <TableHead></TableHead>
+              <TableHead className="sticky left-0 bg-muted/40 z-10"></TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -942,12 +945,15 @@ export default function ShippingPage() {
                     {format(new Date(order.orderDate), "dd/MM/yyyy", { locale: arSA })}
                   </TableCell>
 
-                  {/* Actions */}
-                  <TableCell onClick={(e) => e.stopPropagation()}>
+                  {/* Actions — sticky left keeps buttons visible when table overflows in RTL */}
+                  <TableCell
+                    className="sticky left-0 bg-card"
+                    onClick={(e) => e.stopPropagation()}
+                  >
                     {order.status.name === "جاهز للشحن" ? (
                       <Button
                         size="sm"
-                        onClick={() => setShipTarget(order)}
+                        onClick={(e) => { e.stopPropagation(); setShipTarget(order); }}
                         className="gap-1 whitespace-nowrap"
                       >
                         <Truck className="h-3.5 w-3.5" />
@@ -957,7 +963,7 @@ export default function ShippingPage() {
                       <Button
                         size="sm"
                         variant="outline"
-                        onClick={() => setStatusTarget(order)}
+                        onClick={(e) => { e.stopPropagation(); setStatusTarget(order); }}
                         className="whitespace-nowrap"
                       >
                         تغيير الحالة

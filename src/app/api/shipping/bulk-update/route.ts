@@ -59,9 +59,9 @@ export async function POST(request: NextRequest) {
   let updatedCount = 0;
   const errors: { orderId: string; message: string }[] = [];
 
-  try {
-    await prisma.$transaction(async (tx) => {
-      for (const orderId of orderIds) {
+  for (const orderId of orderIds) {
+    try {
+      await prisma.$transaction(async (tx) => {
         const order = await tx.order.findFirst({
           where: { id: orderId, deletedAt: null },
           include: {
@@ -111,13 +111,11 @@ export async function POST(request: NextRequest) {
             ...(shippingCompanyId && { shippingCompanyId, shippingCompanyName: shippingCompany?.name }),
           },
         });
-
-        updatedCount++;
-      }
-    });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "خطأ غير متوقع";
-    errors.push({ orderId: "bulk", message });
+      });
+      updatedCount++;
+    } catch (err) {
+      errors.push({ orderId, message: err instanceof Error ? err.message : "خطأ غير متوقع" });
+    }
   }
 
   return NextResponse.json({ data: { updatedCount, errors } });

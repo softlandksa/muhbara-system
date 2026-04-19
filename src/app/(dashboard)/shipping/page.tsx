@@ -55,6 +55,13 @@ type UnifiedOrder = {
     deliveredAt: string | null;
     shippingCompany: ShippingCompany;
     shippedBy: { id: string; name: string };
+    shippingSubStatus: {
+      id: string;
+      name: string;
+      colorOverride: string | null;
+      marksOrderDelivered: boolean;
+      primary: { id: string; name: string; color: string };
+    } | null;
   } | null;
 };
 
@@ -917,18 +924,26 @@ export default function ShippingPage() {
 
                   {/* ShippingStatus badge (from DB, colored) */}
                   <TableCell>
-                    {order.shippingInfo ? (
-                      <Badge
-                        variant="outline"
-                        style={{
-                          borderColor: order.status.color,
-                          color: order.status.color,
-                          backgroundColor: order.status.color + "22",
-                        }}
-                        className="text-xs"
-                      >
-                        {order.status.name}
-                      </Badge>
+                    {order.shippingInfo?.shippingSubStatus ? (
+                      (() => {
+                        const sub = order.shippingInfo.shippingSubStatus;
+                        const color = sub.colorOverride ?? sub.primary.color;
+                        return (
+                          <Badge
+                            variant="outline"
+                            style={{
+                              borderColor: color,
+                              color: color,
+                              backgroundColor: color + "22",
+                            }}
+                            className="text-xs"
+                          >
+                            {sub.name}
+                          </Badge>
+                        );
+                      })()
+                    ) : order.shippingInfo ? (
+                      <span className="text-xs text-muted-foreground">—</span>
                     ) : (
                       <span className="text-muted-foreground">—</span>
                     )}
@@ -947,7 +962,7 @@ export default function ShippingPage() {
 
                   {/* Actions — sticky left keeps buttons visible when table overflows in RTL */}
                   <TableCell
-                    className="sticky left-0 bg-card"
+                    className="sticky left-0 z-[1] bg-card"
                     onClick={(e) => e.stopPropagation()}
                   >
                     {order.status.name === "جاهز للشحن" ? (

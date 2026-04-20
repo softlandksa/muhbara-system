@@ -14,7 +14,6 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { NotificationBell } from "./NotificationBell";
-import { GlobalSearch } from "@/components/shared/GlobalSearch";
 import { ROLE_LABELS } from "@/lib/permissions";
 import type { Role } from "@/types";
 
@@ -44,13 +43,8 @@ export function Header({ onToggleSidebar }: HeaderProps) {
         <Menu size={20} />
       </Button>
 
-      {/* Search — takes remaining space */}
-      <div className="flex-1 max-w-md">
-        <GlobalSearch />
-      </div>
-
       {/* Right-side actions */}
-      <div className="flex items-center gap-1.5 mr-auto">
+      <div className="flex items-center gap-1.5 ms-auto">
         <NotificationBell />
 
         {/* User dropdown */}

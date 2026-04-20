@@ -7,7 +7,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { arSA } from "date-fns/locale";
 import {
-  Plus, Search, Download, Upload, Loader2, ChevronRight, ChevronLeft,
+  Plus, Download, Upload, Loader2, ChevronRight, ChevronLeft,
   Filter, X, CalendarIcon, FileDown, AlertCircle, CheckCircle2, Trash2,
   RefreshCw,
 } from "lucide-react";
@@ -15,6 +15,7 @@ import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { SearchInput } from "@/components/ui/search-input";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
@@ -689,13 +690,15 @@ function OrdersPageInner({ setImportOpen }: { setImportOpen: (open: boolean) => 
 
   // ── Query ──
   const queryString = searchParams.toString();
-  const { data, isLoading } = useQuery<PaginatedOrders>({
+  const { data, isLoading, isFetching } = useQuery<PaginatedOrders>({
     queryKey: ["orders", queryString],
     queryFn: () =>
       fetch(`/api/orders?${queryString}&pageSize=${PAGE_SIZE}`).then((r) => r.json()),
     staleTime: 30_000,
     placeholderData: (prev) => prev,
   });
+
+  const isSearching = searchInput !== searchQ || (isFetching && searchQ.length > 0);
 
   // ── Select all ──
   const allIds = data?.data.map((o) => o.id) ?? [];
@@ -869,15 +872,14 @@ function OrdersPageInner({ setImportOpen }: { setImportOpen: (open: boolean) => 
 
       {/* Search + Filter */}
       <div className="flex items-center gap-2">
-        <div className="relative flex-1">
-          <Search className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            className="pr-9"
-            placeholder="بحث برقم الطلب أو اسم العميل أو الجوال..."
-            value={searchInput}
-            onChange={(e) => setSearchInput(e.target.value)}
-          />
-        </div>
+        <SearchInput
+          className="flex-1"
+          placeholder="بحث برقم الطلب أو اسم العميل أو الجوال..."
+          value={searchInput}
+          onChange={setSearchInput}
+          isSearching={isSearching}
+          dir="rtl"
+        />
 
         <Popover open={filterOpen} onOpenChange={setFilterOpen}>
           <PopoverTrigger

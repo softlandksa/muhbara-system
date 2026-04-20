@@ -39,6 +39,7 @@ import { AppLoadingOverlay } from "@/components/shared/AppLoadingOverlay";
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const PAGE_SIZE = 25;
+const EXPORT_WARN_THRESHOLD = 5_000;
 const PREVIEW_HEADERS = ["اسم العميل", "الجوال", "العنوان", "الدولة", "العملة", "طريقة الدفع", "المنتج", "الكمية", "السعر"];
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -651,6 +652,7 @@ function OrdersPageInner({ setImportOpen }: { setImportOpen: (open: boolean) => 
   const [bulkStatusOpen, setBulkStatusOpen] = useState(false);
   const [bulkDeleteConfirm, setBulkDeleteConfirm] = useState(false);
   const [bulkDeleteLoading, setBulkDeleteLoading] = useState(false);
+  const [exportFilterConfirmOpen, setExportFilterConfirmOpen] = useState(false);
 
   // ── Debounce search ──
   useEffect(() => {
@@ -715,6 +717,28 @@ function OrdersPageInner({ setImportOpen }: { setImportOpen: (open: boolean) => 
     });
   };
 
+  // ── Helpers ──
+  const downloadBlob = (blob: Blob, filename: string) => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const buildFilters = () => ({
+    search: searchParams.get("search") || undefined,
+    status: searchParams.getAll("status"),
+    countryId: searchParams.getAll("countryId"),
+    currencyId: searchParams.get("currencyId") || undefined,
+    paymentMethodId: searchParams.get("paymentMethodId") || undefined,
+    createdById: searchParams.get("createdById") || undefined,
+    teamId: searchParams.get("teamId") || undefined,
+    dateFrom: searchParams.get("dateFrom") || undefined,
+    dateTo: searchParams.get("dateTo") || undefined,
+  });
+
   // ── Template download ──
   const handleTemplateDownload = async () => {
     try {
@@ -732,42 +756,47 @@ function OrdersPageInner({ setImportOpen }: { setImportOpen: (open: boolean) => 
     }
   };
 
-  // ── Export all (with filters) ──
-  const handleExport = async () => {
+  // ── Export all matching filters (mode B) — used by header button and banner ──
+  const handleExportFiltered = async (confirmed = false) => {
+    const total = data?.total ?? 0;
+    if (!confirmed && total > EXPORT_WARN_THRESHOLD) {
+      setExportFilterConfirmOpen(true);
+      return;
+    }
+    setExportFilterConfirmOpen(false);
     setExportLoading(true);
     try {
-      const params = new URLSearchParams(searchParams.toString());
-      params.delete("page");
-      params.delete("pageSize");
-      const res = await fetch(`/api/orders/export?${params.toString()}`);
-      if (!res.ok) { toast.error("فشل التصدير"); return; }
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `طلبات_${format(new Date(), "yyyy-MM-dd")}.xlsx`;
-      a.click();
-      URL.revokeObjectURL(url);
+      const res = await fetch("/api/orders/export", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: "query", filters: buildFilters() }),
+      });
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        toast.error((json as { error?: string }).error ?? "فشل التصدير");
+        return;
+      }
+      downloadBlob(await res.blob(), `طلبات_${format(new Date(), "yyyy-MM-dd")}.xlsx`);
     } finally {
       setExportLoading(false);
     }
   };
 
-  // ── Export selected ──
+  // ── Export selected IDs (mode A) ──
   const handleExportSelected = async () => {
     setExportLoading(true);
     try {
-      const params = new URLSearchParams();
-      Array.from(selected).forEach((id) => params.append("ids", id));
-      const res = await fetch(`/api/orders/export?${params.toString()}`);
-      if (!res.ok) { toast.error("فشل التصدير"); return; }
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `طلبات_محددة_${format(new Date(), "yyyy-MM-dd")}.xlsx`;
-      a.click();
-      URL.revokeObjectURL(url);
+      const res = await fetch("/api/orders/export", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: "ids", orderIds: Array.from(selected) }),
+      });
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        toast.error((json as { error?: string }).error ?? "فشل التصدير");
+        return;
+      }
+      downloadBlob(await res.blob(), `طلبات_محددة_${format(new Date(), "yyyy-MM-dd")}.xlsx`);
     } finally {
       setExportLoading(false);
     }
@@ -811,8 +840,8 @@ function OrdersPageInner({ setImportOpen }: { setImportOpen: (open: boolean) => 
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">الطلبات</h1>
         <div className="flex items-center gap-2">
-          {(role === "ADMIN" || role === "GENERAL_MANAGER" || role === "SALES_MANAGER") && (
-            <Button variant="outline" size="sm" onClick={handleExport} disabled={exportLoading}>
+          {(role === "ADMIN" || role === "GENERAL_MANAGER" || role === "SALES_MANAGER" || role === "SALES") && (
+            <Button variant="outline" size="sm" onClick={() => handleExportFiltered()} disabled={exportLoading}>
               {exportLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
               <span className="mr-1 hidden sm:inline">تصدير</span>
             </Button>
@@ -934,19 +963,31 @@ function OrdersPageInner({ setImportOpen }: { setImportOpen: (open: boolean) => 
             تم تحديد {selected.size} طلب
           </span>
           <div className="flex items-center gap-2 mr-auto">
-            {(role === "ADMIN" || role === "GENERAL_MANAGER" || role === "SALES_MANAGER") && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleExportSelected}
-                disabled={exportLoading}
-              >
-                {exportLoading
-                  ? <Loader2 className="h-4 w-4 animate-spin ml-1" />
-                  : <Download className="h-4 w-4 ml-1" />
-                }
-                تصدير المحدد
-              </Button>
+            {(role === "ADMIN" || role === "GENERAL_MANAGER" || role === "SALES_MANAGER" || role === "SALES") && (
+              <>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleExportSelected}
+                  disabled={exportLoading}
+                >
+                  {exportLoading
+                    ? <Loader2 className="h-4 w-4 animate-spin ml-1" />
+                    : <Download className="h-4 w-4 ml-1" />
+                  }
+                  المحدد في الصفحة ({selected.size})
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleExportFiltered()}
+                  disabled={exportLoading}
+                >
+                  <Download className="h-4 w-4 ml-1" />
+                  تحديد الكل حسب الفلاتر
+                  {data?.total != null && ` (${data.total.toLocaleString("ar")})`}
+                </Button>
+              </>
             )}
             {(role === "ADMIN" || role === "SALES_MANAGER") && (
               <Button
@@ -1118,6 +1159,17 @@ function OrdersPageInner({ setImportOpen }: { setImportOpen: (open: boolean) => 
         onConfirm={handleBulkDelete}
         loading={bulkDeleteLoading}
         variant="destructive"
+      />
+
+      {/* Large Export Confirm */}
+      <ConfirmDialog
+        open={exportFilterConfirmOpen}
+        onOpenChange={setExportFilterConfirmOpen}
+        title="تصدير عدد كبير من الطلبات"
+        description={`سيتم تصدير جميع الطلبات المطابقة للفلاتر (${(data?.total ?? 0).toLocaleString("ar")} طلب). هل تريد المتابعة؟`}
+        confirmLabel="تصدير إلى Excel"
+        cancelLabel="إلغاء"
+        onConfirm={() => handleExportFiltered(true)}
       />
     </div>
   );

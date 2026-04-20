@@ -19,6 +19,13 @@ import { SearchInput } from "@/components/ui/search-input";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 import {
@@ -675,18 +682,15 @@ function OrdersPageInner({ setImportOpen }: { setImportOpen: (open: boolean) => 
     router.replace(`${pathname}?${params.toString()}`);
   }, [searchParams, pathname, router]);
 
-  const toggleStatus = useCallback((s: string) => {
+  const setStatusFilter = useCallback((statusId: string) => {
     const params = new URLSearchParams(searchParams.toString());
-    const current = params.getAll("status");
-    if (current.includes(s)) {
-      params.delete("status");
-      current.filter((x) => x !== s).forEach((x) => params.append("status", x));
-    } else {
-      params.append("status", s);
-    }
+    params.delete("status");
+    if (statusId) params.append("status", statusId);
     params.set("page", "1");
     router.replace(`${pathname}?${params.toString()}`);
   }, [searchParams, pathname, router]);
+
+  const statusParam = statusParams[0] ?? "";
 
   // ── Query ──
   const queryString = searchParams.toString();
@@ -894,20 +898,23 @@ function OrdersPageInner({ setImportOpen }: { setImportOpen: (open: boolean) => 
           <PopoverContent className="w-80 p-4 space-y-4" align="end">
             <div className="space-y-2">
               <Label className="text-sm font-medium">الحالة</Label>
-              <div className="grid grid-cols-2 gap-2">
-                {statuses.map((s) => (
-                  <div key={s.id} className="flex items-center gap-2">
-                    <Checkbox
-                      id={`status-${s.id}`}
-                      checked={statusParams.includes(s.id)}
-                      onCheckedChange={() => toggleStatus(s.id)}
-                    />
-                    <label htmlFor={`status-${s.id}`} className="text-xs cursor-pointer">
+              <Select
+                value={statusParam || "all"}
+                onValueChange={(v) => setStatusFilter(!v || v === "all" ? "" : v)}
+                disabled={statuses.length === 0}
+              >
+                <SelectTrigger dir="rtl" className="w-full">
+                  <SelectValue placeholder="كل الحالات" />
+                </SelectTrigger>
+                <SelectContent dir="rtl">
+                  <SelectItem value="all">كل الحالات</SelectItem>
+                  {statuses.map((s) => (
+                    <SelectItem key={s.id} value={s.id}>
                       {s.name}
-                    </label>
-                  </div>
-                ))}
-              </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
 
             <div className="space-y-2">

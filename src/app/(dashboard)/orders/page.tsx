@@ -873,7 +873,7 @@ function OrdersPageInner({ setImportOpen }: { setImportOpen: (open: boolean) => 
       {/* Search + Filter */}
       <div className="flex items-center gap-2">
         <SearchInput
-          className="flex-1"
+          className="w-[30%] min-w-[220px]"
           placeholder="بحث برقم الطلب أو اسم العميل أو الجوال..."
           value={searchInput}
           onChange={setSearchInput}

@@ -18,6 +18,12 @@ function SearchInput({ value, onChange, isSearching, className, ...props }: Sear
     inputRef.current?.focus();
   };
 
+  // left cluster: X (outermost-left) then spinner just to its right
+  const showClear = value.length > 0;
+  const showSpinner = isSearching;
+  // slot widths: X=24px, spinner=24px, gap=2px → reserve pl based on what's shown
+  const leftPad = showClear && showSpinner ? "pl-14" : showClear || showSpinner ? "pl-8" : "pl-2.5";
+
   return (
     <div
       className={cn(
@@ -27,13 +33,9 @@ function SearchInput({ value, onChange, isSearching, className, ...props }: Sear
         className
       )}
     >
-      {/* Leading icon (physical right in RTL): spinner while searching, magnifier at rest */}
+      {/* Trailing icon — magnifier on physical right (RTL text start) */}
       <span className="pointer-events-none absolute right-2.5 flex shrink-0 text-muted-foreground">
-        {isSearching ? (
-          <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" />
-        ) : (
-          <Search className="h-4 w-4" />
-        )}
+        <Search className="h-4 w-4" />
       </span>
 
       <input
@@ -44,22 +46,29 @@ function SearchInput({ value, onChange, isSearching, className, ...props }: Sear
           "h-8 w-full min-w-0 bg-transparent py-1 text-base outline-none",
           "placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50 md:text-sm",
           "pr-9",
-          value.length > 0 ? "pl-8" : "pl-2.5"
+          leftPad
         )}
         {...props}
       />
 
-      {/* Clear button: physical left */}
-      {value.length > 0 && (
-        <button
-          type="button"
-          onClick={handleClear}
-          aria-label="مسح البحث"
-          className="absolute left-2 flex shrink-0 text-muted-foreground hover:text-foreground transition-colors"
-        >
-          <X className="h-4 w-4" />
-        </button>
-      )}
+      {/* Left icon cluster (physical left): spinner adjacent to X */}
+      <span className="absolute left-1.5 flex items-center gap-0.5">
+        {showSpinner && (
+          <span className="flex shrink-0 text-muted-foreground pointer-events-none">
+            <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" />
+          </span>
+        )}
+        {showClear && (
+          <button
+            type="button"
+            onClick={handleClear}
+            aria-label="مسح البحث"
+            className="flex shrink-0 text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        )}
+      </span>
     </div>
   );
 }

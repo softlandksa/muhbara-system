@@ -161,6 +161,9 @@ export async function POST(request: NextRequest) {
   const totalAmount = items.reduce((sum, i) => sum + i.lineTotal, 0);
 
   try {
+    // Keep only the data-integrity writes inside the transaction:
+    // order create + audit log. Notifications and activity log are moved
+    // outside so the advisory lock is held for the minimum possible time.
     const order = await prisma.$transaction(async (tx) => {
       const orderNumber = await generateOrderNumber(tx);
       const created = await tx.order.create({
@@ -201,24 +204,28 @@ export async function POST(request: NextRequest) {
         },
       });
 
-      await createNotificationsForRole(tx, {
+      return created;
+    });
+
+    // Post-transaction fire-and-forget: notifications + activity log.
+    // These don't need to be atomic with the order create — if they fail,
+    // the order is still saved and the user gets a success response.
+    Promise.all([
+      createNotificationsForRole(prisma, {
         role: "SHIPPING",
         title: "طلب جديد جاهز للشحن",
-        message: `طلب رقم ${orderNumber} بواسطة ${session.user.name}`,
+        message: `طلب رقم ${order.orderNumber} بواسطة ${session.user.name}`,
         type: "ORDER_STATUS",
-        relatedOrderId: created.id,
-      });
-
-      await logActivity(tx, {
+        relatedOrderId: order.id,
+      }),
+      logActivity(prisma, {
         userId,
         action: "CREATE_ORDER",
         entityType: "Order",
-        entityId: created.id,
-        details: { orderNumber },
-      });
-
-      return created;
-    });
+        entityId: order.id,
+        details: { orderNumber: order.orderNumber },
+      }),
+    ]).catch((err) => console.error("[POST /api/orders] post-commit side-effects error:", err));
 
     return NextResponse.json({ data: order }, { status: 201 });
   } catch (err) {

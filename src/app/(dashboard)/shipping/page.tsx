@@ -12,22 +12,10 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from "@/components/ui/dialog";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
-import { SearchableSelect } from "@/components/shared/SearchableSelect";
-import { AppLoadingOverlay } from "@/components/shared/AppLoadingOverlay";
 import { ShippingStatusDialog } from "@/components/shared/ShippingStatusDialog";
 import { cn } from "@/lib/utils";
 
@@ -74,166 +62,6 @@ type TabDef = {
   color?: string;     // for shippingStatus tabs
 };
 
-// ─── Bulk Ship Dialog ─────────────────────────────────────────────────────────
-
-function BulkShipDialog({
-  orders,
-  companies,
-  statuses,
-  open,
-  onClose,
-  onShipped,
-}: {
-  orders: UnifiedOrder[];
-  companies: ShippingCompany[];
-  statuses: ShippingStatusItem[];
-  open: boolean;
-  onClose: () => void;
-  onShipped: () => void;
-}) {
-  const [companyId, setCompanyId] = useState("");
-  const [subStatusId, setSubStatusId] = useState("");
-  const [trackingPrefix, setTrackingPrefix] = useState("");
-  const [notes, setNotes] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [progress, setProgress] = useState({ done: 0, total: 0 });
-  const [errors, setErrors] = useState<Record<string, string>>({});
-
-  const reset = () => {
-    setCompanyId(""); setSubStatusId(""); setTrackingPrefix(""); setNotes("");
-    setErrors({}); setProgress({ done: 0, total: 0 });
-  };
-
-  const handleClose = () => { if (loading) return; reset(); onClose(); };
-
-  const validate = () => {
-    const e: Record<string, string> = {};
-    if (!companyId) e.company = "شركة الشحن مطلوبة";
-    if (!subStatusId) e.status = "حالة الشحن مطلوبة";
-    setErrors(e);
-    return Object.keys(e).length === 0;
-  };
-
-  const handleSubmit = async () => {
-    if (!validate()) return;
-    setLoading(true);
-    setProgress({ done: 0, total: orders.length });
-    let succeeded = 0;
-    for (let i = 0; i < orders.length; i++) {
-      const order = orders[i];
-      const trackingNumber = trackingPrefix
-        ? `${trackingPrefix}-${String(i + 1).padStart(3, "0")}`
-        : `BULK-${order.orderNumber}`;
-      try {
-        const res = await fetch("/api/shipping", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            orderId: order.id,
-            shippingCompanyId: companyId,
-            subStatusId,
-            trackingNumber: trackingNumber || undefined,
-            notes: notes.trim() || undefined,
-          }),
-        });
-        if (res.ok) succeeded++;
-      } catch { /* continue */ }
-      setProgress({ done: i + 1, total: orders.length });
-    }
-    toast.success(`تم شحن ${succeeded} من ${orders.length} طلب`);
-    setLoading(false);
-    reset();
-    onShipped();
-  };
-
-  const progressPercent = progress.total > 0
-    ? Math.round((progress.done / progress.total) * 100)
-    : 0;
-
-  return (
-    <Dialog open={open} onOpenChange={(o) => !o && handleClose()}>
-      <DialogContent dir="rtl" className="max-w-md relative">
-        <AppLoadingOverlay
-          open={loading}
-          mode="inline"
-          message={progress.total > 0 ? `جاري الشحن... ${progress.done} / ${progress.total}` : "جاري المعالجة..."}
-        />
-        <DialogHeader>
-          <DialogTitle>شحن {orders.length} طلب دفعة واحدة</DialogTitle>
-        </DialogHeader>
-        <div className="space-y-4">
-          <div className="space-y-1.5">
-            <Label>شركة الشحن</Label>
-            <SearchableSelect
-              options={companies.map((c) => ({ value: c.id, label: c.name }))}
-              value={companyId}
-              onChange={setCompanyId}
-              placeholder="اختر شركة الشحن"
-              error={!!errors.company}
-            />
-            {errors.company && <p className="text-xs text-destructive">{errors.company}</p>}
-          </div>
-          <div className="space-y-1.5">
-            <Label>حالة الشحن</Label>
-            <SearchableSelect
-              options={statuses.flatMap((p) =>
-                p.subs.map((s) => ({
-                  value: s.id,
-                  label: `${p.name} — ${s.name}`,
-                  group: p.name,
-                }))
-              )}
-              value={subStatusId}
-              onChange={setSubStatusId}
-              placeholder="اختر حالة الشحن"
-              error={!!errors.status}
-            />
-            {errors.status && <p className="text-xs text-destructive">{errors.status}</p>}
-          </div>
-          <div className="space-y-1.5">
-            <Label>بادئة رقم التتبع (اختياري)</Label>
-            <Input
-              value={trackingPrefix}
-              onChange={(e) => setTrackingPrefix(e.target.value)}
-              placeholder="مثال: DHL — سيتم إضافة -001، -002... تلقائياً"
-              dir="ltr"
-            />
-            <p className="text-xs text-muted-foreground">إذا تُركت فارغة، يُستخدم رقم الطلب تلقائياً</p>
-          </div>
-          <div className="space-y-1.5">
-            <Label>ملاحظات (اختياري)</Label>
-            <Textarea
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              placeholder="ملاحظات مشتركة للشحنات..."
-              rows={2}
-            />
-          </div>
-          {loading && (
-            <div className="space-y-1.5">
-              <div className="flex justify-between text-xs text-muted-foreground">
-                <span>جار الشحن...</span>
-                <span>{progress.done}/{progress.total}</span>
-              </div>
-              <div className="h-2 bg-muted rounded-full overflow-hidden">
-                <div className="h-full bg-primary transition-all duration-300" style={{ width: `${progressPercent}%` }} />
-              </div>
-            </div>
-          )}
-        </div>
-        <DialogFooter className="gap-2">
-          <Button variant="outline" onClick={handleClose} disabled={loading}>إلغاء</Button>
-          <Button onClick={handleSubmit} disabled={loading}>
-            {loading ? <Loader2 className="h-4 w-4 animate-spin ml-1" /> : <Truck className="h-4 w-4 ml-1" />}
-            تأكيد الشحن
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-// BulkShippingStatusDialog is now ShippingStatusDialog from shared components
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
@@ -247,7 +75,6 @@ export default function ShippingPage() {
   const [statusTarget, setStatusTarget] = useState<UnifiedOrder | null>(null);
   const [rowStatusLoading, setRowStatusLoading] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [bulkShipOpen, setBulkShipOpen] = useState(false);
 
   // ── Explicit bulk-status state machine ──
   // Snapshot IDs when dialog opens so selection changes mid-flight can't corrupt the list.
@@ -257,7 +84,7 @@ export default function ShippingPage() {
 
   // Safety: clear any residual overflow lock base-ui sets on body during dialog close.
   // Two passes: immediate (catches fast closes) + 150ms (catches animated closes).
-  const anyDialogOpen = !!statusTarget || rowStatusLoading || bulkShipOpen || bulkStatusOpen || bulkLoading;
+  const anyDialogOpen = !!statusTarget || rowStatusLoading || bulkStatusOpen || bulkLoading;
   useEffect(() => {
     if (!anyDialogOpen) {
       const raf = requestAnimationFrame(() => {
@@ -376,7 +203,6 @@ export default function ShippingPage() {
 
   // ── Derived from selection ──
   const selectedOrders = filteredOrders.filter((o) => selected.has(o.id));
-  const selectedReadyOrders = selectedOrders.filter((o) => !o.shippingInfo);
 
   // ── Post-action invalidation ──
   const invalidateAll = () => {
@@ -415,12 +241,6 @@ export default function ShippingPage() {
     } else {
       toast.success(orderIds.length === 1 ? "تم تحديث حالة الطلب" : `تم تحديث ${updatedCount} طلب بنجاح`);
     }
-    invalidateAll();
-  };
-
-  const handleBulkShipDone = () => {
-    setBulkShipOpen(false);
-    setSelected(new Set());
     invalidateAll();
   };
 
@@ -563,12 +383,6 @@ export default function ShippingPage() {
             تم تحديد {selected.size} طلب
           </span>
           <div className="flex items-center gap-2 mr-auto">
-            {selectedReadyOrders.length > 0 && (
-              <Button type="button" size="sm" onClick={() => setBulkShipOpen(true)} className="gap-1">
-                <Truck className="h-3.5 w-3.5" />
-                شحن ({selectedReadyOrders.length})
-              </Button>
-            )}
             <Button
               type="button"
               size="sm"
@@ -797,18 +611,6 @@ export default function ShippingPage() {
           loading={rowStatusLoading}
           onClose={() => { if (!rowStatusLoading) setStatusTarget(null); }}
           onSubmit={handleRowStatusSubmit}
-        />
-      )}
-
-      {/* Bulk Ship Dialog */}
-      {bulkShipOpen && (
-        <BulkShipDialog
-          orders={selectedReadyOrders}
-          companies={companies}
-          statuses={shippingStatuses}
-          open={bulkShipOpen}
-          onClose={() => setBulkShipOpen(false)}
-          onShipped={handleBulkShipDone}
         />
       )}
 

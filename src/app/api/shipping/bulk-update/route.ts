@@ -3,7 +3,6 @@ import { getServerSession } from "next-auth";
 import { z } from "zod";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { logActivity } from "@/lib/activity-log";
 
 const bulkUpdateSchema = z.object({
   orderIds:          z.array(z.string().min(1)).min(1, "يجب تحديد طلب واحد على الأقل"),
@@ -31,12 +30,13 @@ export async function POST(request: NextRequest) {
   if (!parsed.success) {
     return NextResponse.json(
       { error: parsed.error.issues[0]?.message ?? "بيانات غير صحيحة" },
-      { status: 400 }
+      { status: 400 },
     );
   }
 
   const { orderIds, subStatusId, shippingCompanyId, trackingNumber } = parsed.data;
 
+  // Fetch sub-status and (optionally) shipping company in parallel
   const [sub, shippingCompany] = await Promise.all([
     prisma.shippingStatusSub.findUnique({
       where: { id: subStatusId },
@@ -47,9 +47,7 @@ export async function POST(request: NextRequest) {
       : Promise.resolve(null),
   ]);
 
-  if (!sub) {
-    return NextResponse.json({ error: "الحالة غير موجودة" }, { status: 404 });
-  }
+  if (!sub) return NextResponse.json({ error: "الحالة غير موجودة" }, { status: 404 });
   if (shippingCompanyId && !shippingCompany) {
     return NextResponse.json({ error: "شركة الشحن غير موجودة" }, { status: 404 });
   }
@@ -57,82 +55,107 @@ export async function POST(request: NextRequest) {
   const isDelivered = sub.marksOrderDelivered;
   const now = new Date();
 
-  let updatedCount = 0;
-  const errors: { orderId: string; message: string }[] = [];
+  // ── Single query: fetch all target orders + their shipping records ────────────
+  // Replaces the old N×findFirst inside the per-order loop (N+1 eliminated).
+  const orders = await prisma.order.findMany({
+    where: { id: { in: orderIds }, deletedAt: null },
+    select: {
+      id: true,
+      status: { select: { name: true } },
+      shippingInfo: { select: { id: true } },
+    },
+  });
 
-  for (const orderId of orderIds) {
-    try {
-      await prisma.$transaction(async (tx) => {
-        const order = await tx.order.findFirst({
-          where: { id: orderId, deletedAt: null },
-          include: {
-            status: { select: { name: true } },
-            shippingInfo: { select: { id: true } },
-          },
-        });
-        if (!order) throw new Error(`الطلب ${orderId} غير موجود`);
+  const foundIds = new Set(orders.map((o) => o.id));
+  const errors: { orderId: string; message: string }[] = orderIds
+    .filter((id) => !foundIds.has(id))
+    .map((id) => ({ orderId: id, message: `الطلب ${id} غير موجود` }));
 
-        await tx.order.update({
-          where: { id: orderId },
-          data: { statusId: sub.primaryId },
-        });
-
-        if (order.shippingInfo) {
-          await tx.shippingInfo.update({
-            where: { id: order.shippingInfo.id },
-            data: {
-              shippingSubStatusId: subStatusId,
-              ...(isDelivered && { deliveredAt: now }),
-              ...(shippingCompanyId && { shippingCompanyId }),
-              // Only overwrite trackingNumber when the caller explicitly provides a non-empty value.
-              ...(trackingNumber?.trim() && { trackingNumber: trackingNumber.trim() }),
-            },
-          });
-        } else if (shippingCompanyId) {
-          // Order has no shipping record yet — create one now (first-time shipping via status dialog).
-          await tx.shippingInfo.create({
-            data: {
-              orderId,
-              shippingCompanyId,
-              shippingSubStatusId: subStatusId,
-              shippedAt: now,
-              shippedById: userId,
-              ...(isDelivered && { deliveredAt: now }),
-              ...(trackingNumber?.trim() && { trackingNumber: trackingNumber.trim() }),
-            },
-          });
-        }
-
-        await tx.orderAuditLog.create({
-          data: {
-            orderId,
-            action:      "STATUS_CHANGE",
-            fieldName:   "status",
-            oldValue:    order.status.name,
-            newValue:    sub.name,
-            changedById: userId,
-            changedAt:   now,
-          },
-        });
-
-        await logActivity(tx, {
-          userId,
-          action:     "UPDATE_ORDER_STATUS",
-          entityType: "Order",
-          entityId:   orderId,
-          details:    {
-            subStatus: sub.name,
-            primary:   sub.primary.name,
-            bulk:      true,
-            ...(shippingCompanyId && { shippingCompanyId, shippingCompanyName: shippingCompany?.name }),
-          },
-        });
-      });
-      updatedCount++;
-    } catch (err) {
-      errors.push({ orderId, message: err instanceof Error ? err.message : "خطأ غير متوقع" });
-    }
+  if (orders.length === 0) {
+    return NextResponse.json({ data: { updatedCount: 0, errors } });
   }
 
-  return NextResponse.json({ data: { updatedCount, errors } });
+  const ordersWithShipping    = orders.filter((o) => o.shippingInfo !== null);
+  const ordersWithoutShipping = orders.filter((o) => o.shippingInfo === null);
+  const trackingTrimmed       = trackingNumber?.trim() || undefined;
+
+  // ── Batch mutations in one transaction ────────────────────────────────────────
+  // Before: N transactions × 5 queries each = 5N round-trips.
+  // After:  1 transaction × 4 batch statements = 4 round-trips regardless of N.
+  try {
+    await prisma.$transaction(async (tx) => {
+      // 1. Update all order statuses at once
+      await tx.order.updateMany({
+        where: { id: { in: orders.map((o) => o.id) } },
+        data:  { statusId: sub.primaryId },
+      });
+
+      // 2. Update existing shipping records at once
+      if (ordersWithShipping.length > 0) {
+        await tx.shippingInfo.updateMany({
+          where: { id: { in: ordersWithShipping.map((o) => o.shippingInfo!.id) } },
+          data: {
+            shippingSubStatusId: subStatusId,
+            ...(isDelivered      && { deliveredAt: now }),
+            ...(shippingCompanyId && { shippingCompanyId }),
+            ...(trackingTrimmed  && { trackingNumber: trackingTrimmed }),
+          },
+        });
+      }
+
+      // 3. Create shipping records for orders that don't have one yet
+      if (shippingCompanyId && ordersWithoutShipping.length > 0) {
+        await tx.shippingInfo.createMany({
+          data: ordersWithoutShipping.map((o) => ({
+            orderId:            o.id,
+            shippingCompanyId:  shippingCompanyId!,
+            shippingSubStatusId: subStatusId,
+            shippedAt:          now,
+            shippedById:        userId,
+            ...(isDelivered     && { deliveredAt: now }),
+            ...(trackingTrimmed && { trackingNumber: trackingTrimmed }),
+          })),
+          skipDuplicates: true, // guard against concurrent updates on the same order
+        });
+      }
+
+      // 4. Batch audit logs
+      await tx.orderAuditLog.createMany({
+        data: orders.map((o) => ({
+          orderId:     o.id,
+          action:      "STATUS_CHANGE",
+          fieldName:   "status",
+          oldValue:    o.status.name,
+          newValue:    sub.name,
+          changedById: userId,
+          changedAt:   now,
+        })),
+      });
+    });
+  } catch (err) {
+    console.error("[bulk-update] transaction error:", err);
+    const message = err instanceof Error ? err.message : "خطأ غير متوقع";
+    for (const o of orders) {
+      errors.push({ orderId: o.id, message });
+    }
+    return NextResponse.json({ data: { updatedCount: 0, errors } });
+  }
+
+  // ── Activity log — fire-and-forget, not on the critical path ─────────────────
+  prisma.activityLog.createMany({
+    data: orders.map((o) => ({
+      userId,
+      action:     "UPDATE_ORDER_STATUS",
+      entityType: "Order",
+      entityId:   o.id,
+      details:    {
+        subStatus: sub.name,
+        primary:   sub.primary.name,
+        bulk:      true,
+        ...(shippingCompanyId && { shippingCompanyId, shippingCompanyName: shippingCompany?.name }),
+      },
+    })),
+  }).catch((err) => console.error("[bulk-update] activity log error:", err));
+
+  return NextResponse.json({ data: { updatedCount: orders.length, errors } });
 }

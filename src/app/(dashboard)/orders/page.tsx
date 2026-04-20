@@ -19,13 +19,6 @@ import { SearchInput } from "@/components/ui/search-input";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 import {
@@ -636,12 +629,16 @@ function OrdersPageInner({ setImportOpen }: { setImportOpen: (open: boolean) => 
   const role = session?.user?.role;
 
   // ── Statuses lookup ──
-  const { data: statusesData } = useQuery<{ data: StatusItem[] }>({
+  const { data: statusesData, isLoading: statusesLoading, isError: statusesError } = useQuery<{ data: StatusItem[] }>({
     queryKey: ["shipping-statuses"],
     queryFn: () => fetch("/api/lookup/shipping-statuses").then((r) => r.json()),
     staleTime: 5 * 60 * 1000,
   });
   const statuses = statusesData?.data ?? [];
+
+  useEffect(() => {
+    if (statusesError) toast.error("فشل تحميل قائمة الحالات");
+  }, [statusesError]);
 
   // ── URL state ──
   const page = parseInt(searchParams.get("page") ?? "1");
@@ -691,7 +688,6 @@ function OrdersPageInner({ setImportOpen }: { setImportOpen: (open: boolean) => 
   }, [searchParams, pathname, router]);
 
   const statusParam = statusParams[0] ?? "";
-  const selectedStatus = statuses.find((s) => s.id === statusParam) ?? null;
 
   // ── Query ──
   const queryString = searchParams.toString();
@@ -899,35 +895,36 @@ function OrdersPageInner({ setImportOpen }: { setImportOpen: (open: boolean) => 
           <PopoverContent className="w-80 p-4 space-y-4" align="end">
             <div className="space-y-2">
               <Label className="text-sm font-medium">الحالة</Label>
-              <Select
-                value={statusParam || "all"}
-                onValueChange={(v) => setStatusFilter(!v || v === "all" ? "" : v)}
-                disabled={statuses.length === 0}
-              >
-                <SelectTrigger dir="rtl" className="w-full">
-                  {selectedStatus ? (
-                    <span className="flex items-center gap-2">
-                      <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ backgroundColor: selectedStatus.color }} />
-                      {selectedStatus.name}
-                    </span>
-                  ) : (
+              {statusesLoading ? (
+                <Skeleton className="h-9 w-full" />
+              ) : (
+                <div className="flex flex-col rounded-md border overflow-hidden">
+                  <button
+                    type="button"
+                    onClick={() => setStatusFilter("")}
+                    className={cn(
+                      "flex items-center gap-2 px-3 py-2 text-sm text-right w-full hover:bg-muted transition-colors",
+                      !statusParam && "bg-muted font-medium"
+                    )}
+                  >
                     <span className="text-muted-foreground">كل الحالات</span>
-                  )}
-                </SelectTrigger>
-                <SelectContent dir="rtl">
-                  <SelectItem value="all">
-                    <span className="text-muted-foreground">كل الحالات</span>
-                  </SelectItem>
+                  </button>
                   {statuses.map((s) => (
-                    <SelectItem key={s.id} value={s.id}>
-                      <span className="flex items-center gap-2">
-                        <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ backgroundColor: s.color }} />
-                        {s.name}
-                      </span>
-                    </SelectItem>
+                    <button
+                      key={s.id}
+                      type="button"
+                      onClick={() => setStatusFilter(s.id)}
+                      className={cn(
+                        "flex items-center gap-2 px-3 py-2 text-sm text-right w-full hover:bg-muted transition-colors border-t",
+                        statusParam === s.id && "bg-muted font-medium"
+                      )}
+                    >
+                      <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ backgroundColor: s.color }} />
+                      <span style={{ color: s.color }}>{s.name}</span>
+                    </button>
                   ))}
-                </SelectContent>
-              </Select>
+                </div>
+              )}
             </div>
 
             <div className="space-y-2">

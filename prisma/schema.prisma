@@ -83,11 +83,13 @@ model Order {
   @@index([currencyId])
   @@index([createdAt])
   @@index([updatedAt])
+  @@index([phone])
   @@index([deletedAt, statusId])
   @@index([deletedAt, teamId])
   @@index([deletedAt, createdById])
   @@index([deletedAt, orderDate])
   @@index([deletedAt, updatedAt])
+  @@index([deletedAt, phone])
 }
 
 model OrderItem {

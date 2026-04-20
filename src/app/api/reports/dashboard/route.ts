@@ -8,16 +8,27 @@ import { subDays, startOfDay, endOfDay, format } from "date-fns";
 export async function GET(request: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: "غير مصرح" }, { status: 401 });
-  const { role, id: userId, teamId } = session.user;
+  const { role, id: userId, teamId: sessionTeamId } = session.user;
 
   const { searchParams } = new URL(request.url);
   const dateFrom = searchParams.get("dateFrom");
   const dateTo = searchParams.get("dateTo");
   const filterTeamId = searchParams.get("teamId");
 
+  // For SALES_MANAGER: prefer User.teamId from session; fall back to the team they manage
+  // (covers managers whose User.teamId was not set at account creation)
+  let managedTeamId = sessionTeamId;
+  if (role === "SALES_MANAGER" && !managedTeamId) {
+    const managed = await prisma.team.findFirst({
+      where: { managerId: userId },
+      select: { id: true },
+    });
+    managedTeamId = managed?.id ?? null;
+  }
+
   // Role-based order filter — no status restriction
   const roleWhere: Record<string, unknown> = { deletedAt: null };
-  if (role === "SALES_MANAGER" && teamId) roleWhere.teamId = teamId;
+  if (role === "SALES_MANAGER" && managedTeamId) roleWhere.teamId = managedTeamId;
   if (role === "SALES") roleWhere.createdById = userId;
   if ((role === "ADMIN" || role === "GENERAL_MANAGER") && filterTeamId) roleWhere.teamId = filterTeamId;
 

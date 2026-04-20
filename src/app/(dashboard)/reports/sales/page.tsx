@@ -161,7 +161,7 @@ function SummaryCard({ title, value, icon, color }: {
   icon: React.ReactNode; color: string;
 }) {
   return (
-    <Card className="border-0 shadow-sm">
+    <Card className="border-0 shadow-sm h-full">
       <CardContent className="p-5">
         <div className="flex items-center justify-between">
           <div>
@@ -170,6 +170,71 @@ function SummaryCard({ title, value, icon, color }: {
           </div>
           <div className={cn("p-3 rounded-2xl", color)}>{icon}</div>
         </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ─── Revenue Summary Card (enlarged, per-currency breakdown) ──────────────────
+
+function RevenueSummaryCard({
+  currencies,
+  totalOrders,
+}: {
+  currencies: { code: string; revenue: number }[];
+  totalOrders: number;
+}) {
+  const nonEmpty = currencies
+    .filter((c) => c.revenue > 0)
+    .sort((a, b) => b.revenue - a.revenue);
+
+  return (
+    <Card className="border-0 shadow-sm bg-gradient-to-br from-emerald-50 to-green-50/40 h-full">
+      <CardContent className="p-5 flex flex-col">
+        <div className="flex items-start justify-between gap-3 mb-3">
+          <div>
+            <p className="text-sm font-semibold text-emerald-800">إجمالي الإيرادات</p>
+            {totalOrders > 0 && (
+              <p className="text-[11px] text-emerald-600/60 mt-0.5">
+                {totalOrders.toLocaleString()} طلب
+              </p>
+            )}
+          </div>
+          <div className="p-2.5 rounded-xl bg-emerald-100 shrink-0">
+            <TrendingUp className="h-5 w-5 text-emerald-600" />
+          </div>
+        </div>
+
+        {nonEmpty.length === 0 ? (
+          <p className="text-3xl font-bold text-muted-foreground">—</p>
+        ) : (
+          <div className="space-y-1.5">
+            {nonEmpty.map((c, i) => (
+              <div
+                key={c.code}
+                className={cn(
+                  "flex items-center justify-between gap-3 rounded-lg px-2.5 py-1.5",
+                  i === 0 ? "bg-emerald-100/70" : "bg-emerald-50/50"
+                )}
+              >
+                <span className="text-xs font-bold font-mono text-emerald-700 tabular-nums">
+                  {c.code}
+                </span>
+                <span
+                  className={cn(
+                    "font-bold tabular-nums text-emerald-900 tracking-tight",
+                    i === 0 ? "text-2xl" : "text-base"
+                  )}
+                >
+                  {c.revenue.toLocaleString(undefined, {
+                    minimumFractionDigits: 0,
+                    maximumFractionDigits: 2,
+                  })}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
       </CardContent>
     </Card>
   );
@@ -338,24 +403,29 @@ function SalesReportsInner() {
         </div>
       </div>
 
-      {/* Summary cards */}
+      {/* Summary cards — revenue first (rightmost in RTL), enlarged with per-currency breakdown */}
       {isLoading ? (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-24" />)}
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+          <div className="col-span-2 lg:col-span-2"><Skeleton className="h-32" /></div>
+          <Skeleton className="h-24" />
+          <Skeleton className="h-24" />
+          <Skeleton className="h-24" />
         </div>
       ) : d && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 items-start">
+          {/* Revenue card — first in DOM = rightmost in RTL; spans 2 cols at all sizes */}
+          <div className="col-span-2 lg:col-span-2">
+            <RevenueSummaryCard
+              currencies={d.currencyChart.map((c) => ({ code: c.name, revenue: c.revenue }))}
+              totalOrders={d.summary.total}
+            />
+          </div>
+          {/* Compact KPI cards */}
           <SummaryCard
             title="إجمالي الطلبات"
             value={d.summary.total.toLocaleString()}
             icon={<ShoppingCart className="h-5 w-5 text-indigo-600" />}
             color="bg-indigo-100"
-          />
-          <SummaryCard
-            title="إجمالي الإيرادات"
-            value={d.summary.totalRevenue.toLocaleString()}
-            icon={<TrendingUp className="h-5 w-5 text-emerald-600" />}
-            color="bg-emerald-100"
           />
           <SummaryCard
             title="تم التوصيل"
@@ -604,8 +674,9 @@ export default function SalesReportsPage() {
     <Suspense fallback={
       <div className="p-6 space-y-6">
         <Skeleton className="h-8 w-64" />
-        <div className="grid grid-cols-4 gap-4">
-          {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-24" />)}
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+          <div className="col-span-2 lg:col-span-2"><Skeleton className="h-32" /></div>
+          <Skeleton className="h-24" /><Skeleton className="h-24" /><Skeleton className="h-24" />
         </div>
         <div className="grid grid-cols-2 gap-6">
           <Skeleton className="h-80" /><Skeleton className="h-80" />

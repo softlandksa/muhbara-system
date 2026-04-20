@@ -39,7 +39,7 @@ export async function GET(request: NextRequest) {
     where,
     include: {
       user: { select: { id: true, name: true, role: true } },
-      rule: { select: { id: true, name: true, commissionType: true } },
+      rule: { select: { id: true, name: true, commissionType: true } }, // null when piecewise
       currency: { select: { id: true, code: true, symbol: true } },
       approvedBy: { select: { id: true, name: true } },
     },

@@ -60,7 +60,12 @@
       "Bash(xargs ls *)",
       "Bash(git add *)",
       "Bash(git commit -m ' *)",
-      "Bash(git push *)"
+      "Bash(git push *)",
+      "Bash(xargs -I {} basename {})",
+      "Bash(grep -E \"\\\\.\\(tsx|ts\\)$\")",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(json.dumps\\(d.get\\('scripts',{}\\), indent=2\\)\\); deps=d.get\\('devDependencies',{}\\); [print\\(k\\) for k in deps if 'test' in k or 'jest' in k or 'vitest' in k]\")",
+      "Bash(npm install *)",
+      "Bash(npx vitest *)"
     ]
   }
 }

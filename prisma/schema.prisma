@@ -315,7 +315,8 @@ model Commission {
   periodStart          DateTime
   periodEnd            DateTime
   totalDeliveredOrders Int
-  ruleId               String
+  ruleId               String?          // nullable: piecewise calculation spans multiple brackets
+  breakdown            Json?            // BracketBreakdown[] snapshot for audit
   commissionAmount     Float
   currencyId           String
   status               CommissionStatus @default(PENDING)
@@ -323,7 +324,7 @@ model Commission {
   approvedById         String?
   approvedBy           User?            @relation("CommissionApprover", fields: [approvedById], references: [id])
   currency             Currency         @relation(fields: [currencyId], references: [id])
-  rule                 CommissionRule   @relation(fields: [ruleId], references: [id])
+  rule                 CommissionRule?  @relation(fields: [ruleId], references: [id])
   user                 User             @relation(fields: [userId], references: [id])
 
   @@index([userId])

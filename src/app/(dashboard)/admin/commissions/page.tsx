@@ -137,8 +137,6 @@ function AddRuleDialog({
     onError: (e: Error) => toast.error(e.message),
   });
 
-  const commissionType = watch("commissionType");
-
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
       <DialogContent dir="rtl" className="max-w-md">
@@ -179,8 +177,7 @@ function AddRuleDialog({
               >
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="FIXED">مبلغ ثابت</SelectItem>
-                  <SelectItem value="PERCENTAGE">نسبة مئوية من المبيعات</SelectItem>
+                  <SelectItem value="FIXED">مبلغ ثابت لكل طلب</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -210,9 +207,7 @@ function AddRuleDialog({
 
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
-              <Label>
-                {commissionType === "PERCENTAGE" ? "النسبة %" : "المبلغ"}
-              </Label>
+              <Label>المبلغ لكل طلب</Label>
               <Input
                 type="number"
                 min={0}
@@ -220,11 +215,9 @@ function AddRuleDialog({
                 {...register("commissionAmount", { valueAsNumber: true })}
                 className={cn(errors.commissionAmount && "border-destructive")}
               />
-              {commissionType === "PERCENTAGE" && (
-                <p className="text-xs text-muted-foreground">
-                  نسبة من إجمالي مبيعات الموظف (المسلمة) في الفترة
-                </p>
-              )}
+              <p className="text-xs text-muted-foreground">
+                مبلغ ثابت يُضرب في عدد الطلبات الواقعة ضمن هذه الشريحة
+              </p>
               {errors.commissionAmount && <p className="text-xs text-destructive">{errors.commissionAmount.message}</p>}
             </div>
             <div className="space-y-1.5">
@@ -388,8 +381,7 @@ function ApplyTiersDialog({
                         {rule.minOrders}–{rule.maxOrders ?? "∞"} طلب
                       </span>
                       <span className="font-semibold text-foreground">
-                        {rule.commissionAmount}
-                        {rule.commissionType === "PERCENTAGE" ? "%" : ` ${rule.currency.code}`}
+                        {rule.commissionAmount} {rule.currency.code} / طلب
                       </span>
                     </div>
                   </div>
@@ -399,7 +391,7 @@ function ApplyTiersDialog({
           </div>
 
           <p className="text-xs text-muted-foreground bg-blue-50 border border-blue-100 rounded p-2">
-            سيتم حساب عدد الطلبات المسلمة لكل موظف خلال الفترة المحددة فقط وتطبيق الشريحة المناسبة تلقائياً. لا يرتبط بالتارجت الشهري.
+            سيتم احتساب العمولة بطريقة تصاعدية: كل شريحة تُطبَّق على الطلبات الواقعة ضمن نطاقها فقط ثم تُجمَع النتائج (حساب هامشي). لا يرتبط بالتارجت الشهري.
           </p>
         </div>
 
@@ -770,12 +762,9 @@ export default function CommissionsAdminPage() {
                         {rule.minOrders} — {rule.maxOrders ?? "∞"}
                       </TableCell>
                       <TableCell className="font-mono">
-                        {rule.commissionAmount}
-                        {rule.commissionType === "PERCENTAGE" ? "%" : ""}
+                        {rule.commissionAmount} {rule.currency.code} / طلب
                       </TableCell>
-                      <TableCell>
-                        {rule.commissionType === "FIXED" ? "مبلغ ثابت" : "% من المبيعات"}
-                      </TableCell>
+                      <TableCell>مبلغ ثابت لكل طلب</TableCell>
                       <TableCell>{rule.currency.code}</TableCell>
                       <TableCell>
                         <button

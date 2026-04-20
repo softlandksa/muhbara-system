@@ -9,6 +9,7 @@ import { arSA } from "date-fns/locale";
 import {
   ShoppingCart, CalendarDays, Package, Truck, CheckCircle,
   RotateCcw, TrendingUp, TrendingDown, CalendarIcon, Tag,
+  Trophy, Target, DollarSign, Flame, Star,
 } from "lucide-react";
 import {
   AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell, LabelList,
@@ -49,6 +50,251 @@ type DashboardData = {
     country: { name: string }; currency: { code: string };
   }[];
 };
+
+// ─── Personal dashboard types (SALES) ────────────────────────────────────────
+
+type BracketBreakdown = {
+  ruleId: string; ruleName: string;
+  lBound: number; hBound: number | null;
+  ordersInBand: number; ratePerOrder: number; bandTotal: number;
+  currencyCode: string; currencySymbol: string;
+};
+
+type MyDashboardData = {
+  orderCount: number;
+  rank: number | null;
+  totalInRank: number;
+  targetOrders: number | null;
+  targetAchievement: number | null;
+  commissionBreakdown: BracketBreakdown[];
+  commissionTotal: number;
+  commissionCurrencyCode: string | null;
+  commissionCurrencySymbol: string | null;
+  periodStart: string;
+  periodEnd: string;
+};
+
+// ─── Personal widgets ─────────────────────────────────────────────────────────
+
+const BRACKET_COLORS = ["#6366f1", "#8b5cf6", "#06b6d4", "#10b981", "#f59e0b", "#ef4444"];
+
+function RankWidget({ data }: { data: MyDashboardData }) {
+  const { rank, totalInRank, orderCount } = data;
+  const medal =
+    rank === 1 ? "🥇" : rank === 2 ? "🥈" : rank === 3 ? "🥉" : null;
+
+  return (
+    <Card className="border-0 shadow-sm bg-gradient-to-br from-amber-50 to-orange-50">
+      <CardContent className="p-5">
+        <div className="flex items-center gap-3 mb-3">
+          <div className="p-2 rounded-xl bg-amber-100">
+            <Trophy className="h-5 w-5 text-amber-600" />
+          </div>
+          <p className="font-semibold text-sm text-amber-900">ترتيبك هذا الشهر</p>
+        </div>
+        {rank !== null ? (
+          <div className="flex items-end gap-3">
+            <div className="flex items-baseline gap-1">
+              {medal && <span className="text-3xl">{medal}</span>}
+              <span className="text-4xl font-extrabold tracking-tight text-amber-700">
+                #{rank}
+              </span>
+            </div>
+            <div className="mb-1 text-sm text-muted-foreground">
+              من أصل {totalInRank} موظف
+            </div>
+          </div>
+        ) : (
+          <p className="text-muted-foreground text-sm">لا توجد طلبات مسلَّمة بعد هذا الشهر</p>
+        )}
+        <p className="text-xs text-amber-700/70 mt-2 flex items-center gap-1">
+          <ShoppingCart className="h-3 w-3" />
+          {orderCount} طلب مسلَّم
+        </p>
+      </CardContent>
+    </Card>
+  );
+}
+
+function TargetWidget({ data }: { data: MyDashboardData }) {
+  const { targetOrders, targetAchievement, orderCount } = data;
+  const pct = targetAchievement ?? 0;
+  const capped = Math.min(pct, 100);
+
+  const ringColor =
+    pct >= 100 ? "#10b981" :
+    pct >= 80  ? "#22c55e" :
+    pct >= 50  ? "#f59e0b" :
+                 "#ef4444";
+
+  const motivationText =
+    pct >= 100 ? "أحسنت! حققت هدفك الشهري 🎉" :
+    pct >= 80  ? "اقترب من هدفك الشهري، أنت قريب جداً!" :
+    pct >= 50  ? "في منتصف الطريق، استمر!" :
+                 "ابدأ قوياً نحو هدفك الشهري";
+
+  if (!targetOrders) {
+    return (
+      <Card className="border-0 shadow-sm">
+        <CardContent className="p-5 flex flex-col items-center justify-center min-h-[160px] text-center gap-2">
+          <Target className="h-8 w-8 text-muted-foreground/40" />
+          <p className="text-sm text-muted-foreground">لم يُحدَّد تارجت شهري لهذا الشهر</p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  // SVG progress ring
+  const r = 52;
+  const circ = 2 * Math.PI * r;
+  const dash = (capped / 100) * circ;
+
+  return (
+    <Card className="border-0 shadow-sm">
+      <CardContent className="p-5">
+        <div className="flex items-center gap-3 mb-4">
+          <div className="p-2 rounded-xl bg-green-100">
+            <Target className="h-5 w-5 text-green-600" />
+          </div>
+          <div>
+            <p className="font-semibold text-sm">نسبة تحقيق التارجت</p>
+            <p className="text-xs text-muted-foreground">{motivationText}</p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-6">
+          {/* Progress ring */}
+          <div className="relative shrink-0" aria-label={`${pct}% تحقيق`}>
+            <svg width="128" height="128" className="rotate-[-90deg]">
+              <circle cx="64" cy="64" r={r} fill="none" stroke="#e2e8f0" strokeWidth="10" />
+              <circle
+                cx="64" cy="64" r={r}
+                fill="none"
+                stroke={ringColor}
+                strokeWidth="10"
+                strokeLinecap="round"
+                strokeDasharray={`${dash} ${circ}`}
+                className="motion-safe:transition-all motion-safe:duration-700"
+              />
+            </svg>
+            <div className="absolute inset-0 flex flex-col items-center justify-center">
+              <span className="text-2xl font-extrabold" style={{ color: ringColor }}>
+                {pct}%
+              </span>
+              <span className="text-[10px] text-muted-foreground">تحقيق</span>
+            </div>
+          </div>
+
+          {/* Stats */}
+          <div className="space-y-3 flex-1">
+            <div>
+              <p className="text-xs text-muted-foreground">الفعلي</p>
+              <p className="text-2xl font-bold">{orderCount}</p>
+              <p className="text-xs text-muted-foreground">طلب مسلَّم</p>
+            </div>
+            <div className="h-px bg-muted" />
+            <div>
+              <p className="text-xs text-muted-foreground">الهدف</p>
+              <p className="text-xl font-bold text-muted-foreground">{targetOrders}</p>
+              <p className="text-xs text-muted-foreground">طلب</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Progress bar (accessible alternative) */}
+        <div className="mt-4 space-y-1" aria-hidden="true">
+          <div className="h-2 w-full rounded-full bg-muted overflow-hidden">
+            <div
+              className="h-full rounded-full motion-safe:transition-all motion-safe:duration-700"
+              style={{ width: `${capped}%`, backgroundColor: ringColor }}
+            />
+          </div>
+          <div className="flex justify-between text-[10px] text-muted-foreground">
+            <span>{orderCount} طلب</span>
+            <span>الهدف: {targetOrders}</span>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function CommissionWidget({ data }: { data: MyDashboardData }) {
+  const { commissionBreakdown, commissionTotal, commissionCurrencyCode, orderCount } = data;
+
+  if (commissionBreakdown.length === 0) {
+    return (
+      <Card className="border-0 shadow-sm">
+        <CardContent className="p-5 flex flex-col items-center justify-center min-h-[160px] text-center gap-2">
+          <DollarSign className="h-8 w-8 text-muted-foreground/40" />
+          <p className="text-sm text-muted-foreground">
+            {orderCount === 0 ? "لا توجد طلبات مسلَّمة بعد" : "لا توجد شرائح عمولة مفعَّلة"}
+          </p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <Card className="border-0 shadow-sm">
+      <CardContent className="p-5">
+        <div className="flex items-center gap-3 mb-4">
+          <div className="p-2 rounded-xl bg-indigo-100">
+            <DollarSign className="h-5 w-5 text-indigo-600" />
+          </div>
+          <div>
+            <p className="font-semibold text-sm">العمولة المستحقة</p>
+            <p className="text-xs text-muted-foreground">تفصيل حسب الشرائح</p>
+          </div>
+        </div>
+
+        <div className="space-y-2 mb-4">
+          {commissionBreakdown.map((b, i) => {
+            const color = BRACKET_COLORS[i % BRACKET_COLORS.length];
+            const maxBand = Math.max(...commissionBreakdown.map((x) => x.bandTotal));
+            const barPct = maxBand > 0 ? (b.bandTotal / maxBand) * 100 : 0;
+            return (
+              <div key={b.ruleId} className="space-y-1">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="flex items-center gap-1.5">
+                    <span
+                      className="inline-block h-2.5 w-2.5 rounded-sm shrink-0"
+                      style={{ backgroundColor: color }}
+                      aria-hidden="true"
+                    />
+                    <span className="font-medium">{b.ruleName}</span>
+                    <span className="text-muted-foreground">
+                      ({b.lBound}–{b.hBound ?? "∞"})
+                    </span>
+                  </span>
+                  <span className="font-semibold tabular-nums" style={{ color }}>
+                    {b.ordersInBand} × {b.ratePerOrder.toLocaleString()} = {b.bandTotal.toLocaleString()} {b.currencyCode}
+                  </span>
+                </div>
+                <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden" aria-hidden="true">
+                  <div
+                    className="h-full rounded-full motion-safe:transition-all motion-safe:duration-500"
+                    style={{ width: `${barPct}%`, backgroundColor: color }}
+                  />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="pt-3 border-t flex items-center justify-between">
+          <div className="flex items-center gap-1.5">
+            <Star className="h-4 w-4 text-amber-500" />
+            <span className="font-semibold text-sm">إجمالي المستحق</span>
+          </div>
+          <span className="text-xl font-extrabold text-indigo-700">
+            {commissionTotal.toLocaleString()} {commissionCurrencyCode}
+          </span>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
 
 const CHART_COLORS = [
   "#6366f1", "#8b5cf6", "#06b6d4", "#10b981",
@@ -248,6 +494,15 @@ function DashboardInner() {
   const isFollowup = role === "FOLLOWUP";
   const showCharts = isAdmin || isGeneralManager || isManager || isSales;
 
+  // Personal dashboard data — only fetched for SALES employees
+  const { data: myDashRaw, isLoading: myDashLoading } = useQuery<{ data: MyDashboardData }>({
+    queryKey: ["my-dashboard"],
+    queryFn: () => fetch("/api/reports/my-dashboard").then((r) => r.json()),
+    enabled: isSales,
+    staleTime: 60_000,
+  });
+  const myDash = myDashRaw?.data;
+
   // Top 8 countries for bar chart
   const countryData = (() => {
     if (!d?.countryChart) return [];
@@ -302,6 +557,27 @@ function DashboardInner() {
           </div>
         )}
       </div>
+
+      {/* ── Personal widgets (SALES only) ── */}
+      {isSales && (
+        <div className="space-y-4">
+          <div className="flex items-center gap-2">
+            <Flame className="h-5 w-5 text-orange-500" />
+            <h2 className="font-bold text-base">أدائك الشخصي — {format(new Date(), "MMMM yyyy", { locale: arSA })}</h2>
+          </div>
+          {myDashLoading ? (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {[0, 1, 2].map((i) => <Skeleton key={i} className="h-48" />)}
+            </div>
+          ) : myDash ? (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <RankWidget data={myDash} />
+              <TargetWidget data={myDash} />
+              <CommissionWidget data={myDash} />
+            </div>
+          ) : null}
+        </div>
+      )}
 
       {/* Stats cards — §12.1: fixed header cards + dynamic primary cards from API */}
       {isLoading ? (

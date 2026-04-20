@@ -7,7 +7,7 @@ import { endOfDay } from "date-fns";
 export async function GET(request: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: "غير مصرح" }, { status: 401 });
-  const { role, teamId: sessionTeamId } = session.user;
+  const { role, id: userId, teamId: sessionTeamId } = session.user;
 
   if (role !== "ADMIN" && role !== "GENERAL_MANAGER" && role !== "SALES_MANAGER") {
     return NextResponse.json({ error: "ممنوع" }, { status: 403 });
@@ -19,6 +19,16 @@ export async function GET(request: NextRequest) {
   const statusIds  = searchParams.getAll("status");
   const countryIds = searchParams.getAll("countryId");
   const currencyId = searchParams.get("currencyId");
+
+  // For SALES_MANAGER: prefer User.teamId; fall back to team they manage
+  let managedTeamId = sessionTeamId;
+  if (role === "SALES_MANAGER" && !managedTeamId) {
+    const managed = await prisma.team.findFirst({
+      where: { managerId: userId },
+      select: { id: true },
+    });
+    managedTeamId = managed?.id ?? null;
+  }
 
   // Delivered: metadata-based. Returned/cancelled: name-based (no metadata flag).
   // "تم الشحن" removed — that status doesn't exist in seed data and was never correct.
@@ -42,7 +52,7 @@ export async function GET(request: NextRequest) {
   const cancelledId         = statusByName.get("ملغي");
 
   const teamWhere: Record<string, unknown> = {};
-  if (role === "SALES_MANAGER" && sessionTeamId) teamWhere.id = sessionTeamId;
+  if (role === "SALES_MANAGER" && managedTeamId) teamWhere.id = managedTeamId;
 
   const teams = await prisma.team.findMany({
     where: teamWhere,

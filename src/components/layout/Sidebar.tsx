@@ -27,6 +27,7 @@ import {
   TrendingUp,
   Package,
   Target,
+  Trophy,
 } from "lucide-react";
 import { useState, useEffect } from "react";
 
@@ -113,7 +114,7 @@ const navItems: NavItem[] = [
         roles: ["ADMIN", "GENERAL_MANAGER", "SALES_MANAGER", "FOLLOWUP", "HR"],
       },
       {
-        label: "العمولات والتارجت",
+        label: "العمولات",
         href: "/reports/commissions",
         icon: <DollarSign size={18} />,
         roles: ["ADMIN", "GENERAL_MANAGER", "SALES_MANAGER", "HR"],
@@ -135,6 +136,12 @@ const navItems: NavItem[] = [
         href: "/reports/targets",
         icon: <Target size={18} />,
         roles: ["ADMIN", "GENERAL_MANAGER", "SALES_MANAGER", "SALES", "SHIPPING", "FOLLOWUP"],
+      },
+      {
+        label: "الترتيب",
+        href: "/reports/leaderboard",
+        icon: <Trophy size={18} />,
+        roles: ["ADMIN", "GENERAL_MANAGER", "SALES_MANAGER"],
       },
     ],
   },

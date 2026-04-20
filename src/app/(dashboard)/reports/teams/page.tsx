@@ -8,7 +8,8 @@ import { useRouter } from "next/navigation";
 import { format } from "date-fns";
 import {
   UsersRound, Users, ShoppingCart, CheckCircle, TrendingUp,
-  Filter, X, CalendarIcon,
+  Filter, X, CalendarIcon, ChevronDown, ChevronUp, ArrowLeft,
+  Trophy, Loader2,
 } from "lucide-react";
 
 import { Card, CardContent } from "@/components/ui/card";
@@ -18,6 +19,10 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
+} from "@/components/ui/table";
 import { PerformanceCard } from "@/components/shared/PerformanceCard";
 import { cn } from "@/lib/utils";
 import type { Role } from "@/types";
@@ -42,6 +47,15 @@ type StatusItem = { id: string; name: string; color: string };
 type Country    = { id: string; name: string };
 type Currency   = { id: string; code: string; name: string };
 
+type MemberSale = { userId: string; rank: number; total: number; orderCount: number };
+type SalesByCurrency = { currencyCode: string; members: MemberSale[] };
+type StatusMatrixRow = { userId: string; total: number; counts: Record<string, number> };
+type TeamMembersData = {
+  members: { id: string; name: string }[];
+  salesByCurrency: SalesByCurrency[];
+  statusMatrix: { statuses: StatusItem[]; rows: StatusMatrixRow[] };
+};
+
 // ─── Filters ─────────────────────────────────────────────────────────────────
 
 type Filters = {
@@ -52,7 +66,7 @@ const DEFAULT_FILTERS: Filters = {
   dateFrom: "", dateTo: "", statuses: [], countryIds: [], currencyId: "",
 };
 
-// ─── Shared tab bar (links to /reports/teams and /reports/employees) ─────────
+// ─── Shared tab bar ───────────────────────────────────────────────────────────
 
 function ReportsTabs({ active }: { active: "teams" | "employees" }) {
   const tabs = [
@@ -198,6 +212,221 @@ function FiltersBar({
   );
 }
 
+// ─── Team Expansion Panel ─────────────────────────────────────────────────────
+
+function RankBadge({ rank }: { rank: number }) {
+  const cls =
+    rank === 1 ? "bg-yellow-400 text-yellow-900" :
+    rank === 2 ? "bg-slate-300  text-slate-700"  :
+    rank === 3 ? "bg-amber-600  text-white"       :
+                 "bg-muted      text-muted-foreground";
+  return (
+    <span className={cn("inline-flex h-6 w-6 items-center justify-center rounded-full text-[11px] font-bold shrink-0", cls)}>
+      {rank}
+    </span>
+  );
+}
+
+function TeamExpansionPanel({
+  team, filters, onClose, teamOrdersHref,
+}: {
+  team: TeamStat;
+  filters: Filters;
+  onClose: () => void;
+  teamOrdersHref: string;
+}) {
+  const apiParams = useMemo(() => {
+    const p = new URLSearchParams();
+    if (filters.dateFrom) p.set("dateFrom", filters.dateFrom);
+    if (filters.dateTo)   p.set("dateTo",   filters.dateTo);
+    filters.statuses.forEach((s) => p.append("status", s));
+    filters.countryIds.forEach((c) => p.append("countryId", c));
+    if (filters.currencyId) p.set("currencyId", filters.currencyId);
+    return p.toString();
+  }, [filters]);
+
+  const { data, isLoading } = useQuery<{ data: TeamMembersData }>({
+    queryKey: ["team-members", team.id, apiParams],
+    queryFn: () => fetch(`/api/reports/teams/${team.id}/members?${apiParams}`).then((r) => r.json()),
+    staleTime: 60_000,
+  });
+
+  const memberMap = useMemo(() => {
+    const m = new Map<string, string>();
+    data?.data.members.forEach((mem) => m.set(mem.id, mem.name));
+    return m;
+  }, [data]);
+
+  const d = data?.data;
+
+  return (
+    <Card className="border-primary border-2 shadow-lg">
+      <CardContent className="p-5">
+        {/* Panel header */}
+        <div className="flex items-start justify-between gap-3 mb-5">
+          <div>
+            <div className="flex items-center gap-2">
+              <UsersRound className="h-5 w-5 text-primary" />
+              <h3 className="font-bold text-base">{team.name}</h3>
+              <Badge variant="secondary" className="text-xs">{team.memberCount} موظف</Badge>
+            </div>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              المدير: {team.manager.name}
+              {(filters.dateFrom || filters.dateTo) && (
+                <span className="mx-1">
+                  · {filters.dateFrom || "—"} → {filters.dateTo || "—"}
+                </span>
+              )}
+            </p>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <Link href={teamOrdersHref}>
+              <Button variant="outline" size="sm" className="h-7 gap-1 text-xs">
+                <ArrowLeft className="h-3 w-3" />
+                جميع الطلبات
+              </Button>
+            </Link>
+            <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={onClose}>
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+
+        {isLoading ? (
+          <div className="space-y-3">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <Skeleton key={i} className="h-10 w-full" />
+            ))}
+            <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground py-4">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              جارٍ تحميل البيانات…
+            </div>
+          </div>
+        ) : !d || (d.salesByCurrency.length === 0 && d.statusMatrix.rows.length === 0) ? (
+          <div className="text-center py-12 text-muted-foreground">
+            <UsersRound className="h-10 w-10 mx-auto mb-3 opacity-30" />
+            <p>لا توجد بيانات للفترة المحددة</p>
+          </div>
+        ) : (
+          <Tabs defaultValue="sales" dir="rtl">
+            <TabsList className="mb-4">
+              <TabsTrigger value="sales" className="gap-1.5">
+                <Trophy className="h-3.5 w-3.5" />
+                ترتيب المبيعات
+              </TabsTrigger>
+              <TabsTrigger value="orders" className="gap-1.5">
+                <ShoppingCart className="h-3.5 w-3.5" />
+                الطلبات والحالات
+              </TabsTrigger>
+            </TabsList>
+
+            {/* ── Panel A: Sales ranking by member, per currency ── */}
+            <TabsContent value="sales">
+              {d.salesByCurrency.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground text-sm">
+                  لا توجد مبيعات للفترة المحددة
+                </div>
+              ) : (
+                <div className="space-y-6">
+                  {d.salesByCurrency.map((curr) => (
+                    <div key={curr.currencyCode}>
+                      <div className="flex items-center gap-2 mb-3">
+                        <Badge className="font-mono">{curr.currencyCode}</Badge>
+                        <span className="text-xs text-muted-foreground">
+                          {curr.members.length} موظف · {curr.members.reduce((s, m) => s + m.orderCount, 0)} طلب
+                        </span>
+                      </div>
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead className="w-12 text-center">الترتيب</TableHead>
+                            <TableHead>الموظف</TableHead>
+                            <TableHead className="text-left font-mono">
+                              المبيعات ({curr.currencyCode})
+                            </TableHead>
+                            <TableHead className="text-center">الطلبات</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {curr.members.map((m) => (
+                            <TableRow key={m.userId}>
+                              <TableCell className="text-center">
+                                <RankBadge rank={m.rank} />
+                              </TableCell>
+                              <TableCell className="font-medium">
+                                {memberMap.get(m.userId) ?? "—"}
+                              </TableCell>
+                              <TableCell className="font-mono font-semibold text-left">
+                                {m.total.toLocaleString()}
+                              </TableCell>
+                              <TableCell className="text-center">
+                                <Badge variant="secondary">{m.orderCount}</Badge>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </TabsContent>
+
+            {/* ── Panel B: Orders & statuses by member ── */}
+            <TabsContent value="orders">
+              {d.statusMatrix.rows.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground text-sm">
+                  لا توجد طلبات للفترة المحددة
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="min-w-[130px]">الموظف</TableHead>
+                        {d.statusMatrix.statuses.map((s) => (
+                          <TableHead key={s.id} className="text-center whitespace-nowrap">
+                            <span
+                              className="inline-block px-2 py-0.5 rounded-md text-[11px] font-medium"
+                              style={{
+                                backgroundColor: s.color + "22",
+                                color: s.color,
+                              }}
+                            >
+                              {s.name}
+                            </span>
+                          </TableHead>
+                        ))}
+                        <TableHead className="text-center font-bold">الإجمالي</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {d.statusMatrix.rows.map((row) => (
+                        <TableRow key={row.userId}>
+                          <TableCell className="font-medium">
+                            {memberMap.get(row.userId) ?? "—"}
+                          </TableCell>
+                          {d.statusMatrix.statuses.map((s) => (
+                            <TableCell key={s.id} className="text-center tabular-nums">
+                              {row.counts[s.id] ?? 0}
+                            </TableCell>
+                          ))}
+                          <TableCell className="text-center font-bold tabular-nums">
+                            {row.total}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+            </TabsContent>
+          </Tabs>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
@@ -207,6 +436,7 @@ export default function TeamsReportPage() {
   const role = session?.user?.role as Role | undefined;
 
   const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS);
+  const [expandedTeamId, setExpandedTeamId] = useState<string | null>(null);
 
   const allowed = role === "ADMIN" || role === "GENERAL_MANAGER" || role === "SALES_MANAGER";
 
@@ -245,14 +475,14 @@ export default function TeamsReportPage() {
     placeholderData: (prev) => prev,
   });
 
-  const handleFiltersChange = useCallback((f: Filters) => setFilters(f), []);
+  const handleFiltersChange = useCallback((f: Filters) => {
+    setFilters(f);
+    // Collapse panel when filters change so user sees updated data on re-expand
+  }, []);
 
   const handleTeamClick = useCallback((team: TeamStat) => {
-    const qs = new URLSearchParams();
-    if (filters.dateFrom) qs.set("dateFrom", filters.dateFrom);
-    if (filters.dateTo)   qs.set("dateTo",   filters.dateTo);
-    router.push(`/reports/teams/${team.id}/orders?${qs.toString()}`);
-  }, [filters, router]);
+    setExpandedTeamId((prev) => (prev === team.id ? null : team.id));
+  }, []);
 
   if (!allowed) {
     return (
@@ -264,6 +494,16 @@ export default function TeamsReportPage() {
   }
 
   const teams = data?.data ?? [];
+  const expandedTeam = teams.find((t) => t.id === expandedTeamId) ?? null;
+
+  const teamOrdersHref = expandedTeam
+    ? (() => {
+        const qs = new URLSearchParams();
+        if (filters.dateFrom) qs.set("dateFrom", filters.dateFrom);
+        if (filters.dateTo)   qs.set("dateTo",   filters.dateTo);
+        return `/reports/teams/${expandedTeam.id}/orders?${qs.toString()}`;
+      })()
+    : "#";
 
   return (
     <div className="p-6 space-y-6" dir="rtl">
@@ -282,16 +522,16 @@ export default function TeamsReportPage() {
 
       {/* Summary row */}
       {!isLoading && teams.length > 0 && (() => {
-        const totalOrders  = teams.reduce((s, t) => s + t.totalOrders, 0);
+        const totalOrders    = teams.reduce((s, t) => s + t.totalOrders, 0);
         const totalDelivered = teams.reduce((s, t) => s + t.delivered, 0);
-        const overallRate  = totalOrders > 0 ? Math.round((totalDelivered / totalOrders) * 100) : 0;
+        const overallRate    = totalOrders > 0 ? Math.round((totalDelivered / totalOrders) * 100) : 0;
         return (
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
             {[
-              { label: "إجمالي الطلبات",  value: totalOrders,                        icon: <ShoppingCart className="h-5 w-5 text-indigo-600" />, bg: "bg-indigo-50" },
-              { label: "تم التوصيل",       value: totalDelivered,                     icon: <CheckCircle  className="h-5 w-5 text-green-600"  />, bg: "bg-green-50"  },
-              { label: "معدل التوصيل",     value: `${overallRate}%`,                  icon: <TrendingUp   className="h-5 w-5 text-purple-600" />, bg: "bg-purple-50" },
-              { label: "عدد الفرق",        value: teams.length,                       icon: <UsersRound   className="h-5 w-5 text-blue-600"   />, bg: "bg-blue-50"   },
+              { label: "إجمالي الطلبات",  value: totalOrders,    icon: <ShoppingCart className="h-5 w-5 text-indigo-600" />, bg: "bg-indigo-50" },
+              { label: "تم التوصيل",       value: totalDelivered, icon: <CheckCircle  className="h-5 w-5 text-green-600"  />, bg: "bg-green-50"  },
+              { label: "معدل التوصيل",     value: `${overallRate}%`, icon: <TrendingUp className="h-5 w-5 text-purple-600" />, bg: "bg-purple-50" },
+              { label: "عدد الفرق",        value: teams.length,   icon: <UsersRound   className="h-5 w-5 text-blue-600"   />, bg: "bg-blue-50"   },
             ].map((s) => (
               <Card key={s.label} className="border-0 shadow-sm">
                 <CardContent className="p-4 flex items-center gap-3">
@@ -326,23 +566,60 @@ export default function TeamsReportPage() {
         <div className="text-center py-20 text-muted-foreground">لا توجد فرق أو لا توجد بيانات للفترة المحددة</div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {teams.map((team) => (
-            <PerformanceCard
-              key={team.id}
-              variant="team"
-              name={team.name}
-              managerName={team.manager.name}
-              memberCount={team.memberCount}
-              totalOrders={team.totalOrders}
-              delivered={team.delivered}
-              shipped={team.shipped}
-              returned={team.returned}
-              cancelled={team.cancelled}
-              deliveryRate={team.deliveryRate}
-              revenueByCurrency={team.revenueByCurrency}
-              onClick={() => handleTeamClick(team)}
-            />
-          ))}
+          {teams.map((team) => {
+            const isExpanded = expandedTeamId === team.id;
+            return (
+              <div
+                key={team.id}
+                className={cn(
+                  "rounded-xl transition-all duration-200",
+                  isExpanded && "ring-2 ring-primary ring-offset-2"
+                )}
+              >
+                {/* Expansion toggle hint */}
+                <div className="relative">
+                  <PerformanceCard
+                    variant="team"
+                    name={team.name}
+                    managerName={team.manager.name}
+                    memberCount={team.memberCount}
+                    totalOrders={team.totalOrders}
+                    delivered={team.delivered}
+                    shipped={team.shipped}
+                    returned={team.returned}
+                    cancelled={team.cancelled}
+                    deliveryRate={team.deliveryRate}
+                    revenueByCurrency={team.revenueByCurrency}
+                    onClick={() => handleTeamClick(team)}
+                  />
+                  {/* Expand indicator chip */}
+                  <div className={cn(
+                    "absolute bottom-0 left-1/2 -translate-x-1/2 translate-y-3",
+                    "flex items-center gap-1 rounded-full border bg-background px-2.5 py-0.5 text-[10px] font-medium shadow-sm",
+                    isExpanded ? "border-primary text-primary" : "text-muted-foreground",
+                  )}>
+                    {isExpanded ? (
+                      <><ChevronUp className="h-3 w-3" />إغلاق</>
+                    ) : (
+                      <><ChevronDown className="h-3 w-3" />تفاصيل الأعضاء</>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Expansion panel — full width, appears below grid when a team is selected */}
+      {expandedTeam && (
+        <div className="mt-6 animate-in slide-in-from-top-2 duration-200">
+          <TeamExpansionPanel
+            team={expandedTeam}
+            filters={filters}
+            onClose={() => setExpandedTeamId(null)}
+            teamOrdersHref={teamOrdersHref}
+          />
         </div>
       )}
     </div>

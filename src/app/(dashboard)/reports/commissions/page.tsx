@@ -6,7 +6,7 @@ import { useSession } from "next-auth/react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { arSA } from "date-fns/locale";
-import { CalendarIcon, Target, TrendingUp, DollarSign, Users } from "lucide-react";
+import { CalendarIcon, Target, TrendingUp, DollarSign, Users, Info } from "lucide-react";
 import { toast } from "sonner";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -19,9 +19,11 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import { SearchableSelect } from "@/components/shared/SearchableSelect";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { ROLE_LABELS } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
 import type { Role, CommissionStatus } from "@/types";
+import type { BracketBreakdown } from "@/lib/commission-math";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -30,10 +32,11 @@ type Commission = {
   periodStart: string; periodEnd: string;
   totalDeliveredOrders: number;
   commissionAmount: number;
+  breakdown: BracketBreakdown[] | null;
   status: CommissionStatus;
   calculatedAt: string;
   user: { id: string; name: string; role: Role };
-  rule: { id: string; name: string; commissionType: string };
+  rule: { id: string; name: string; commissionType: string } | null; // null for piecewise
   currency: { id: string; code: string; symbol: string };
   approvedBy: { id: string; name: string } | null;
 };
@@ -445,7 +448,32 @@ function CommissionsInner() {
                         {format(new Date(c.periodStart),"dd/MM/yyyy",{locale:arSA})} — {format(new Date(c.periodEnd),"dd/MM/yyyy",{locale:arSA})}
                       </TableCell>
                       <TableCell className="text-center font-mono">{c.totalDeliveredOrders}</TableCell>
-                      <TableCell className="text-sm">{c.rule.name}</TableCell>
+                      <TableCell className="text-sm">
+                        {c.breakdown && c.breakdown.length > 0 ? (
+                          <TooltipProvider>
+                            <Tooltip>
+                              <TooltipTrigger className="flex items-center gap-1 cursor-help">
+                                <span>{c.breakdown.length} {c.breakdown.length === 1 ? "شريحة" : "شرائح"}</span>
+                                <Info className="h-3.5 w-3.5 text-muted-foreground" />
+                              </TooltipTrigger>
+                              <TooltipContent side="left" className="max-w-xs text-xs space-y-1 p-3" dir="rtl">
+                                {c.breakdown.map((b, i) => (
+                                  <div key={i} className="flex justify-between gap-4">
+                                    <span className="text-muted-foreground">
+                                      {b.ruleName} ({b.lBound}–{b.hBound ?? "∞"})
+                                    </span>
+                                    <span className="font-mono">
+                                      {b.ordersInBand} × {b.ratePerOrder.toLocaleString()} = {b.bandTotal.toLocaleString()}
+                                    </span>
+                                  </div>
+                                ))}
+                              </TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
+                        ) : (
+                          <span className="text-muted-foreground">{c.rule?.name ?? "—"}</span>
+                        )}
+                      </TableCell>
                       <TableCell className="text-end font-bold">
                         {c.commissionAmount.toLocaleString()} {c.currency.code}
                       </TableCell>

@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { endOfDay, startOfMonth, endOfMonth } from "date-fns";
+import { computePiecewise } from "@/lib/commission-math";
 
 export async function GET(request: NextRequest) {
   const session = await getServerSession(authOptions);
@@ -67,11 +68,21 @@ export async function GET(request: NextRequest) {
   });
   const targetByUserId = new Map(userTargets.map((t) => [t.userId, t.targetOrders]));
 
-  // Batch-fetch active commission rules (for tier matching)
+  // Batch-fetch active FIXED commission rules for piecewise KPI estimation.
+  // This is a display-only estimate; authoritative commission amounts are
+  // computed by the admin calculate endpoint and stored in Commission records.
   const rules = await prisma.commissionRule.findMany({
-    where: { isActive: true },
+    where: { isActive: true, commissionType: "FIXED" },
     include: { currency: { select: { code: true, symbol: true } } },
   });
+
+  // Group rules by (roleType, currencyId) for piecewise scheduling
+  const scheduleMap = new Map<string, typeof rules>();
+  for (const r of rules) {
+    const key = `${r.roleType}:${r.currencyId}`;
+    if (!scheduleMap.has(key)) scheduleMap.set(key, []);
+    scheduleMap.get(key)!.push(r);
+  }
 
   const results = await Promise.all(
     employees.map(async (emp) => {
@@ -95,27 +106,32 @@ export async function GET(request: NextRequest) {
           ? Math.round((deliveredOrders / targetOrders) * 100)
           : null;
 
-      // Match commission tier (independent of target)
-      const empRule = rules.find(
-        (r) =>
-          r.roleType === emp.role &&
-          deliveredOrders >= r.minOrders &&
-          (r.maxOrders === null || deliveredOrders <= r.maxOrders),
-      );
-
+      // Piecewise commission KPI (estimate, first matching currency schedule for role)
       let commissionAmount = 0;
-      if (empRule) {
-        if (empRule.commissionType === "FIXED") {
-          commissionAmount = empRule.commissionAmount;
-        } else {
-          const revenueAgg = await prisma.order.aggregate({
-            where: { ...orderWhere, statusId: deliveredStatus?.id },
-            _sum: { totalAmount: true },
-          });
-          commissionAmount =
-            ((revenueAgg._sum.totalAmount ?? 0) * empRule.commissionAmount) / 100;
+      let commissionCurrency: { code: string; symbol: string } | null = null;
+      let ruleName: string | null = null;
+
+      for (const [key, brackets] of scheduleMap.entries()) {
+        const [scheduleRole] = key.split(":");
+        if (scheduleRole !== emp.role) continue;
+
+        const { total } = computePiecewise(
+          deliveredOrders,
+          brackets.map((b) => ({
+            id: b.id,
+            name: b.name,
+            minOrders: b.minOrders,
+            maxOrders: b.maxOrders,
+            commissionAmount: b.commissionAmount,
+          })),
+        );
+
+        if (total > 0) {
+          commissionAmount = total;
+          commissionCurrency = brackets[0].currency;
+          ruleName = brackets.length === 1 ? brackets[0].name : `${brackets.length} شرائح`;
+          break; // use first matching currency schedule for display
         }
-        commissionAmount = Math.round(commissionAmount * 100) / 100;
       }
 
       return {
@@ -128,8 +144,8 @@ export async function GET(request: NextRequest) {
         targetOrders,
         targetAchievement,
         commissionAmount,
-        commissionCurrency: empRule?.currency ?? null,
-        ruleName: empRule?.name ?? null,
+        commissionCurrency,
+        ruleName,
       };
     }),
   );

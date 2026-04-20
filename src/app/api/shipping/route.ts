@@ -52,10 +52,12 @@ export async function GET(request: NextRequest) {
   }
 
   const { searchParams } = new URL(request.url);
-  const statusId = searchParams.get("statusId");
+  const statusId  = searchParams.get("statusId");
+  const countryId = searchParams.get("countryId");
 
   const where: Record<string, unknown> = { deletedAt: null };
-  if (statusId) where.statusId = statusId;
+  if (statusId)  where.statusId  = statusId;
+  if (countryId) where.countryId = countryId;
 
   const data = await prisma.order.findMany({
     where,

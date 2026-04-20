@@ -6,7 +6,7 @@ import { useSession } from "next-auth/react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { arSA } from "date-fns/locale";
-import { Loader2, Truck, ExternalLink, RefreshCw, CheckSquare } from "lucide-react";
+import { Loader2, Truck, ExternalLink, RefreshCw, CheckSquare, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -33,6 +33,7 @@ import { cn } from "@/lib/utils";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
+type Country = { id: string; name: string; code: string };
 type ShippingCompany = { id: string; name: string; trackingUrl: string | null };
 type ShippingStatusSub = { id: string; name: string; colorOverride: string | null; marksOrderDelivered: boolean; sortOrder: number };
 type ShippingStatusItem = { id: string; name: string; color: string; sortOrder: number; subs: ShippingStatusSub[] };
@@ -242,6 +243,7 @@ export default function ShippingPage() {
   const router = useRouter();
 
   const [activeTab, setActiveTab] = useState("all");
+  const [selectedCountryId, setSelectedCountryId] = useState("");
   const [statusTarget, setStatusTarget] = useState<UnifiedOrder | null>(null);
   const [rowStatusLoading, setRowStatusLoading] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -280,6 +282,13 @@ export default function ShippingPage() {
     staleTime: 5 * 60_000,
   });
 
+  const { data: countries = [] } = useQuery<Country[]>({
+    queryKey: ["lookup-countries"],
+    queryFn: () => fetch("/api/lookup/countries").then((r) => r.json()).then((r) => r.data),
+    enabled: isAllowed,
+    staleTime: 5 * 60_000,
+  });
+
   const { data: shippingStatuses = [] } = useQuery<ShippingStatusItem[]>({
     queryKey: ["lookup-shipping-statuses"],
     queryFn: () => fetch("/api/lookup/shipping-statuses").then((r) => r.json()).then((r) => r.data),
@@ -287,10 +296,14 @@ export default function ShippingPage() {
     staleTime: 5 * 60_000,
   });
 
-  // ── All orders — single unified query ──
+  // ── All orders — re-fetched when country filter changes ──
   const { data: allOrders = [], isLoading, refetch } = useQuery<UnifiedOrder[]>({
-    queryKey: ["shipping-all"],
-    queryFn: () => fetch("/api/shipping").then((r) => r.json()).then((r) => r.data),
+    queryKey: ["shipping-all", selectedCountryId],
+    queryFn: () => {
+      const url = new URL("/api/shipping", window.location.origin);
+      if (selectedCountryId) url.searchParams.set("countryId", selectedCountryId);
+      return fetch(url.toString()).then((r) => r.json()).then((r) => r.data);
+    },
     enabled: isAllowed,
     staleTime: 60_000,
     refetchInterval: 60_000,
@@ -450,6 +463,12 @@ export default function ShippingPage() {
     setSelected(new Set());
   };
 
+  // ── Country filter change ──
+  const handleCountryChange = (countryId: string) => {
+    setSelectedCountryId(countryId);
+    setSelected(new Set());
+  };
+
   return (
     <div className="p-6 space-y-4" dir="rtl">
       {/* Header */}
@@ -458,6 +477,37 @@ export default function ShippingPage() {
         <Button variant="outline" size="sm" onClick={() => refetch()} disabled={isLoading}>
           <RefreshCw className={cn("h-4 w-4", isLoading && "animate-spin")} />
         </Button>
+      </div>
+
+      {/* Filter row: Country + active badges */}
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="flex items-center gap-2">
+          <label className="text-sm font-medium whitespace-nowrap">الدولة:</label>
+          <select
+            value={selectedCountryId}
+            onChange={(e) => handleCountryChange(e.target.value)}
+            className="h-8 rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1 min-w-[140px]"
+          >
+            <option value="">كل الدول</option>
+            {countries.map((c) => (
+              <option key={c.id} value={c.id}>{c.name}</option>
+            ))}
+          </select>
+        </div>
+
+        {/* Active filter badges */}
+        {selectedCountryId && (() => {
+          const country = countries.find((c) => c.id === selectedCountryId);
+          return country ? (
+            <button
+              onClick={() => handleCountryChange("")}
+              className="inline-flex items-center gap-1 rounded-full bg-primary/10 text-primary px-2.5 py-0.5 text-xs font-medium hover:bg-primary/20 transition-colors"
+            >
+              الدولة: {country.name}
+              <X className="h-3 w-3" />
+            </button>
+          ) : null;
+        })()}
       </div>
 
       {/* Tab bar — scrollable, dynamic */}
@@ -570,7 +620,31 @@ export default function ShippingPage() {
             ) : filteredOrders.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={12} className="text-center py-12 text-muted-foreground">
-                  لا توجد طلبات
+                  <div className="space-y-1">
+                    <p>لا توجد طلبات تطابق الفلاتر المحددة</p>
+                    {(selectedCountryId || activeTab !== "all") && (
+                      <p className="text-xs">
+                        جرب{" "}
+                        {selectedCountryId && (
+                          <button
+                            onClick={() => handleCountryChange("")}
+                            className="underline hover:text-foreground"
+                          >
+                            إلغاء فلتر الدولة
+                          </button>
+                        )}
+                        {selectedCountryId && activeTab !== "all" && " أو "}
+                        {activeTab !== "all" && (
+                          <button
+                            onClick={() => handleTabChange("all")}
+                            className="underline hover:text-foreground"
+                          >
+                            عرض كل الحالات
+                          </button>
+                        )}
+                      </p>
+                    )}
+                  </div>
                 </TableCell>
               </TableRow>
             ) : (

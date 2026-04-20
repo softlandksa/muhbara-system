@@ -691,6 +691,7 @@ function OrdersPageInner({ setImportOpen }: { setImportOpen: (open: boolean) => 
   }, [searchParams, pathname, router]);
 
   const statusParam = statusParams[0] ?? "";
+  const selectedStatus = statuses.find((s) => s.id === statusParam) ?? null;
 
   // ── Query ──
   const queryString = searchParams.toString();
@@ -904,13 +905,25 @@ function OrdersPageInner({ setImportOpen }: { setImportOpen: (open: boolean) => 
                 disabled={statuses.length === 0}
               >
                 <SelectTrigger dir="rtl" className="w-full">
-                  <SelectValue placeholder="كل الحالات" />
+                  {selectedStatus ? (
+                    <span className="flex items-center gap-2">
+                      <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ backgroundColor: selectedStatus.color }} />
+                      {selectedStatus.name}
+                    </span>
+                  ) : (
+                    <span className="text-muted-foreground">كل الحالات</span>
+                  )}
                 </SelectTrigger>
                 <SelectContent dir="rtl">
-                  <SelectItem value="all">كل الحالات</SelectItem>
+                  <SelectItem value="all">
+                    <span className="text-muted-foreground">كل الحالات</span>
+                  </SelectItem>
                   {statuses.map((s) => (
                     <SelectItem key={s.id} value={s.id}>
-                      {s.name}
+                      <span className="flex items-center gap-2">
+                        <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ backgroundColor: s.color }} />
+                        {s.name}
+                      </span>
                     </SelectItem>
                   ))}
                 </SelectContent>

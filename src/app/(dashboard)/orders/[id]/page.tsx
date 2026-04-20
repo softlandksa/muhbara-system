@@ -125,6 +125,7 @@ const FIELD_LABELS: Record<string, string> = {
   customerName:    "اسم العميل",
   phone:           "رقم الجوال",
   address:         "العنوان",
+  orderDate:       "تاريخ الطلب",
   status:          "حالة الطلب",
   shippingStatus:  "حالة الشحن",
   countryId:       "الدولة",
@@ -391,21 +392,23 @@ export default function OrderDetailPage() {
               {order.status.name}
             </Badge>
           </div>
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-0.5 text-sm text-muted-foreground">
-            <span>{format(new Date(order.orderDate), "EEEE، dd MMMM yyyy", { locale: arSA })}</span>
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-sm text-muted-foreground">
             <span className="flex items-center gap-1">
-              <span>أنشأ الطلب:</span>
+              <span className="font-medium text-foreground/60">تاريخ الطلب:</span>
+              <span className="font-semibold text-foreground">
+                {format(new Date(order.orderDate), "EEEE، dd MMMM yyyy", { locale: arSA })}
+              </span>
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="font-medium text-foreground/60">أُدخل في النظام:</span>
+              <span>{format(new Date(order.createdAt), "dd/MM/yyyy HH:mm", { locale: arSA })}</span>
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="font-medium text-foreground/60">أضافه:</span>
               <span className="font-medium text-foreground">{order.createdBy.name}</span>
-              <span>—</span>
-              <span dir="ltr">{order.createdBy.email}</span>
-              <span>—</span>
-              <span>{ROLE_LABELS[order.createdBy.role as keyof typeof ROLE_LABELS] ?? order.createdBy.role}</span>
-              {order.createdAt && (
-                <>
-                  <span>—</span>
-                  <span>{format(new Date(order.createdAt), "dd/MM/yyyy HH:mm", { locale: arSA })}</span>
-                </>
-              )}
+              <span className="text-muted-foreground/60">
+                ({ROLE_LABELS[order.createdBy.role as keyof typeof ROLE_LABELS] ?? order.createdBy.role})
+              </span>
             </span>
           </div>
         </div>
@@ -512,10 +515,6 @@ export default function OrderDetailPage() {
                 <p className="font-medium">{order.paymentMethod.name}</p>
               </div>
               <div>
-                <p className="text-muted-foreground">المنشئ</p>
-                <p className="font-medium">{order.createdBy.name}</p>
-              </div>
-              <div>
                 <p className="text-muted-foreground">الإجمالي</p>
                 <p className="font-bold text-lg">{order.totalAmount.toFixed(2)} {order.currency.code}</p>
               </div>
@@ -525,6 +524,27 @@ export default function OrderDetailPage() {
                   <p className="mt-1 text-sm bg-muted rounded px-3 py-2">{order.notes}</p>
                 </div>
               )}
+              <Separator className="col-span-2" />
+              <div>
+                <p className="text-muted-foreground">تاريخ الطلب</p>
+                <p className="font-medium">{format(new Date(order.orderDate), "dd/MM/yyyy", { locale: arSA })}</p>
+                <p className="text-xs text-muted-foreground">التاريخ التجاري للطلب</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">تاريخ الإضافة للنظام</p>
+                <p className="font-medium">{format(new Date(order.createdAt), "dd/MM/yyyy HH:mm", { locale: arSA })}</p>
+                <p className="text-xs text-muted-foreground">وقت تسجيل الطلب في النظام</p>
+              </div>
+              <div className="col-span-2">
+                <p className="text-muted-foreground">أضافه / المستخدم المُدخل</p>
+                <p className="font-medium">
+                  {order.createdBy.name}
+                  <span className="text-muted-foreground font-normal mr-1">
+                    — {ROLE_LABELS[order.createdBy.role as keyof typeof ROLE_LABELS] ?? order.createdBy.role}
+                  </span>
+                </p>
+                <p className="text-xs text-muted-foreground" dir="ltr">{order.createdBy.email}</p>
+              </div>
             </CardContent>
           </Card>
 

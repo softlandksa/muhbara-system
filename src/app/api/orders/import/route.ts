@@ -13,6 +13,42 @@ import {
   pickDataSheet,
 } from "@/lib/import-columns";
 
+/**
+ * Parse a raw cell value from Excel into a JS Date for use as orderDate.
+ * Accepts: JS Date (from cellDates:true), "YYYY-MM-DD", "DD/MM/YYYY", Excel serial number.
+ * Returns null if the value is absent or cannot be parsed.
+ */
+function parseOrderDate(raw: unknown): Date | null {
+  if (raw === null || raw === undefined || raw === "") return null;
+  if (raw instanceof Date) return isNaN(raw.getTime()) ? null : raw;
+
+  const str = String(raw).trim();
+  if (!str) return null;
+
+  // YYYY-MM-DD
+  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+    const d = new Date(str + "T00:00:00");
+    return isNaN(d.getTime()) ? null : d;
+  }
+
+  // DD/MM/YYYY
+  const dmy = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (dmy) {
+    const d = new Date(`${dmy[3]}-${dmy[2].padStart(2, "0")}-${dmy[1].padStart(2, "0")}T00:00:00`);
+    return isNaN(d.getTime()) ? null : d;
+  }
+
+  // Excel serial (numeric string, e.g. "45000")
+  const serial = Number(str);
+  if (!isNaN(serial) && serial > 1000 && serial < 2958466) {
+    // Excel epoch: Dec 30, 1899 (accounts for Excel's 1900 leap-year bug)
+    const d = new Date(new Date(1899, 11, 30).getTime() + serial * 86400000);
+    return isNaN(d.getTime()) ? null : d;
+  }
+
+  return null;
+}
+
 // ── Fallback minimal template (no DB calls, no reference sheets) ──────────────
 export async function GET() {
   const headers = IMPORT_COLUMNS.map((c) => c.header);
@@ -67,7 +103,7 @@ export async function POST(request: NextRequest) {
   let wb: XLSX.WorkBook;
   try {
     const bytes = new Uint8Array(await file.arrayBuffer());
-    wb = XLSX.read(bytes, { type: "array" });
+    wb = XLSX.read(bytes, { type: "array", cellDates: true });
   } catch (e) {
     console.error("[import] XLSX parse error:", e);
     return NextResponse.json(
@@ -212,6 +248,18 @@ export async function POST(request: NextRequest) {
       const rawTotal    = parseFloat(String(row["السعر"] ?? "0"));
       const lineTotal   = isNaN(rawTotal) || rawTotal < 0 ? 0 : rawTotal;
 
+      // ── تاريخ الطلب: use cell value; fall back to today only when column absent/empty ──
+      const rawOrderDate = row["تاريخ الطلب"];
+      const parsedOrderDate = parseOrderDate(rawOrderDate);
+      if (rawOrderDate !== undefined && rawOrderDate !== "" && parsedOrderDate === null) {
+        errors.push({
+          row: rowNum,
+          error: `تاريخ الطلب غير صالح: "${rawOrderDate}" — الصيغ المقبولة: YYYY-MM-DD أو DD/MM/YYYY أو رقم تاريخ Excel`,
+        });
+        continue;
+      }
+      const orderDate = parsedOrderDate ?? new Date();
+
       const employeeEmail = String(
         row["الموظف المسؤول (البريد الإلكتروني)"] ?? ""
       ).trim().toLowerCase();
@@ -287,7 +335,7 @@ export async function POST(request: NextRequest) {
         const o = await tx.order.create({
           data: {
             orderNumber,
-            orderDate: new Date(),
+            orderDate,
             customerName,
             phone,
             address,
@@ -315,13 +363,20 @@ export async function POST(request: NextRequest) {
           },
         });
         await tx.orderAuditLog.create({
-          data: { orderId: o.id, action: "CREATE", changedById: userId, changedAt: new Date() },
+          data: {
+            orderId:     o.id,
+            action:      "IMPORT_ORDER",
+            changedById: userId,
+            changedAt:   new Date(),
+            newValue:    parsedOrderDate ? `تاريخ الطلب: ${orderDate.toISOString().slice(0, 10)}` : null,
+          },
         });
         await logActivity(tx, {
           userId,
           action:     "IMPORT_ORDER",
           entityType: "Order",
           entityId:   o.id,
+          details:    { orderDate: orderDate.toISOString().slice(0, 10), importedById: userId },
         });
         return o;
       });

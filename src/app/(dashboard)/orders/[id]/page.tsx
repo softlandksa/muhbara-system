@@ -8,7 +8,7 @@ import { format, formatDistanceToNow } from "date-fns";
 import { arSA } from "date-fns/locale";
 import {
   ArrowRight, Loader2, MessageSquare, Package, MapPin, Phone,
-  CreditCard, Truck, Clock, FileText, Trash2, RefreshCw, Pencil,
+  CreditCard, Truck, Clock, FileText, Trash2, RefreshCw, Pencil, Receipt,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -75,6 +75,9 @@ type OrderDetail = {
   createdBy: { id: string; name: string; email: string; role: string };
   createdAt: string;
   team: { id: string; name: string } | null;
+  paymentReceiptUrl: string | null;
+  paymentReceiptMime: string | null;
+  paymentReceiptUploadedAt: string | null;
   items: {
     id: string;
     quantity: number;
@@ -119,6 +122,7 @@ const ACTION_LABELS: Record<string, string> = {
   FIELD_UPDATE:            "تحديث حقل",
   IMPORT_ORDER:            "استيراد طلب",
   SHIP_ORDER:              "شحن الطلب",
+  RECEIPT_UPLOADED:        "تم رفع إيصال سداد",
 };
 
 const FIELD_LABELS: Record<string, string> = {
@@ -518,6 +522,20 @@ export default function OrderDetailPage() {
                 <p className="text-muted-foreground">الإجمالي</p>
                 <p className="font-bold text-lg">{order.totalAmount.toFixed(2)} {order.currency.code}</p>
               </div>
+              {order.paymentReceiptUrl && (
+                <div className="col-span-2">
+                  <p className="text-muted-foreground flex items-center gap-1 mb-1"><Receipt className="h-3 w-3" /> إيصال السداد</p>
+                  <a
+                    href={`/api/orders/${order.id}/receipt`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 rounded-md border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-sm font-medium text-emerald-700 hover:bg-emerald-100 transition-colors"
+                  >
+                    <Receipt className="h-4 w-4" />
+                    عرض إيصال السداد
+                  </a>
+                </div>
+              )}
               {order.notes && (
                 <div className="col-span-2">
                   <p className="text-muted-foreground flex items-center gap-1"><FileText className="h-3 w-3" /> ملاحظات</p>

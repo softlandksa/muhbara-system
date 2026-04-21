@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback, useRef, Suspense } from "react";
+import React, { useState, useEffect, useCallback, useRef, Suspense, useMemo } from "react";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -134,6 +134,39 @@ function ImportDialog({
     setResult(null);
     setLoading(false);
   };
+
+  // ── O(n) per-row duplicate flags ──────────────────────────────────────────
+  // Computed from previewRows + dupPhones; no nested scans per cell render.
+  const { rowFlags, inFilePhoneDups, existingPhoneDups, inFileNameDups } = useMemo(() => {
+    const normPhone = (r: Record<string, unknown>) => String(r["الجوال"] ?? "").trim();
+    const normName  = (r: Record<string, unknown>) => String(r["اسم العميل"] ?? "").trim().toLowerCase();
+
+    const phoneCount = new Map<string, number>();
+    const nameCount  = new Map<string, number>();
+    for (const row of previewRows) {
+      const p = normPhone(row); if (p) phoneCount.set(p, (phoneCount.get(p) ?? 0) + 1);
+      const n = normName(row);  if (n)  nameCount.set(n,  (nameCount.get(n)  ?? 0) + 1);
+    }
+
+    const flags = previewRows.map((row) => {
+      const p = normPhone(row);
+      const n = normName(row);
+      return {
+        duplicatePhone: (p ? (phoneCount.get(p) ?? 0) > 1 : false) || (p ? !!dupPhones[p] : false),
+        duplicateName:  n ? (nameCount.get(n) ?? 0) > 1 : false,
+      };
+    });
+
+    return {
+      rowFlags: flags,
+      // distinct phone values that repeat inside the file
+      inFilePhoneDups: [...phoneCount.entries()].filter(([, c]) => c > 1).length,
+      // phones that exist in the DB (from async check-duplicate)
+      existingPhoneDups: Object.keys(dupPhones).length,
+      // distinct name values that repeat inside the file
+      inFileNameDups: [...nameCount.entries()].filter(([, c]) => c > 1).length,
+    };
+  }, [previewRows, dupPhones]);
 
   const handleClose = () => { reset(); onClose(); };
 
@@ -404,12 +437,40 @@ function ImportDialog({
                   </button>
                 </div>
 
-                {Object.keys(dupPhones).length > 0 && (
-                  <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-orange-50 border border-orange-200 text-sm text-orange-800">
-                    <AlertCircle className="h-4 w-4 shrink-0" />
-                    <span>
-                      تم اكتشاف{" "}
-                      <strong>{Object.keys(dupPhones).length}</strong> رقم جوال مكرر — سيتم تمييز الطلبات كعملاء مكررين عند الاستيراد
+                {/* ── Duplicate warning banner ───────────────────────────── */}
+                {(inFilePhoneDups > 0 || existingPhoneDups > 0 || inFileNameDups > 0) && (
+                  <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg bg-amber-50 border border-amber-200 text-sm text-amber-800">
+                    <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+                    <div className="space-y-0.5 leading-snug">
+                      {(inFilePhoneDups > 0 || existingPhoneDups > 0) && (
+                        <p>
+                          {inFilePhoneDups > 0 && (
+                            <><strong>{inFilePhoneDups}</strong> جوال مكرر داخل الملف{existingPhoneDups > 0 ? " · " : ""}</>
+                          )}
+                          {existingPhoneDups > 0 && (
+                            <><strong>{existingPhoneDups}</strong> جوال موجود مسبقاً في النظام</>
+                          )}
+                          {" — سيتم تمييز الطلبات كعملاء مكررين عند الاستيراد"}
+                        </p>
+                      )}
+                      {inFileNameDups > 0 && (
+                        <p><strong>{inFileNameDups}</strong> اسم عميل مكرر داخل الملف</p>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* ── Legend (shown only when there are highlighted cells) ── */}
+                {(inFilePhoneDups > 0 || existingPhoneDups > 0 || inFileNameDups > 0) && (
+                  <div className="flex items-center gap-3 text-xs text-muted-foreground select-none" aria-hidden="true">
+                    <span className="flex items-center gap-1.5">
+                      <span className="inline-block w-3 h-3 rounded-sm bg-amber-100 ring-1 ring-amber-400 shrink-0" />
+                      الجوال المكرر
+                    </span>
+                    <span className="text-muted-foreground/40">|</span>
+                    <span className="flex items-center gap-1.5">
+                      <span className="inline-block w-3 h-3 rounded-sm bg-rose-100 ring-1 ring-rose-400 shrink-0" />
+                      الاسم المكرر
                     </span>
                   </div>
                 )}
@@ -435,23 +496,53 @@ function ImportDialog({
                     </thead>
                     <tbody>
                       {previewRows.slice(0, 50).map((row, i) => {
-                        const phone = String(row["الجوال"] ?? "").trim();
-                        const isDup = !!dupPhones[phone];
+                        const flags = rowFlags[i] ?? { duplicatePhone: false, duplicateName: false };
+                        const hasAnyDup = flags.duplicatePhone || flags.duplicateName;
                         return (
-                          <tr key={i} className={cn("border-b last:border-0", isDup ? "bg-orange-50/60" : "hover:bg-muted/30")}>
+                          <tr
+                            key={i}
+                            className={cn(
+                              "border-b last:border-0 hover:bg-muted/20",
+                              // RTL leading-edge indicator: border-r is the visual start in dir="rtl"
+                              hasAnyDup && "border-r-2 border-r-amber-400"
+                            )}
+                          >
                             <td className="px-3 py-1.5 text-right text-muted-foreground">{i + 1}</td>
-                            {PREVIEW_HEADERS.map((h) => (
-                              <td key={h} className="px-3 py-1.5 text-right whitespace-nowrap">
-                                {h === "الجوال" && isDup ? (
-                                  <span className="inline-flex items-center gap-1">
-                                    <span>{String(row[h] ?? "")}</span>
-                                    <span className="inline-flex rounded-full bg-orange-100 px-1 py-0.5 text-[9px] font-medium text-orange-700 border border-orange-200">مكرر</span>
-                                  </span>
-                                ) : (
-                                  String(row[h] ?? "")
-                                )}
-                              </td>
-                            ))}
+                            {PREVIEW_HEADERS.map((h) => {
+                              const isPhoneCol = h === "الجوال";
+                              const isNameCol  = h === "اسم العميل";
+                              const showPhone  = isPhoneCol && flags.duplicatePhone;
+                              const showName   = isNameCol  && flags.duplicateName;
+                              return (
+                                <td
+                                  key={h}
+                                  className={cn(
+                                    "px-3 py-1.5 text-right whitespace-nowrap",
+                                    showPhone && "bg-amber-100 ring-1 ring-inset ring-amber-400",
+                                    showName  && "bg-rose-100  ring-1 ring-inset ring-rose-400"
+                                  )}
+                                >
+                                  {showPhone || showName ? (
+                                    <span className="inline-flex items-center gap-1">
+                                      <span>{String(row[h] ?? "")}</span>
+                                      <span
+                                        className={cn(
+                                          "inline-flex rounded-full px-1 py-0.5 text-[9px] font-semibold border",
+                                          showPhone
+                                            ? "bg-amber-50 text-amber-800 border-amber-400"
+                                            : "bg-rose-50  text-rose-800  border-rose-400"
+                                        )}
+                                        aria-label="مكرر"
+                                      >
+                                        مكرر
+                                      </span>
+                                    </span>
+                                  ) : (
+                                    String(row[h] ?? "")
+                                  )}
+                                </td>
+                              );
+                            })}
                           </tr>
                         );
                       })}

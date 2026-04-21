@@ -59,9 +59,12 @@ model Order {
   createdAt          DateTime              @default(now())
   updatedAt          DateTime              @updatedAt
   deletedAt          DateTime?
-  isRepeatCustomer   Boolean               @default(false)
-  repeatCustomerNote String?
-  statusId           String
+  isRepeatCustomer         Boolean               @default(false)
+  repeatCustomerNote       String?
+  statusId                 String
+  paymentReceiptUrl        String?
+  paymentReceiptMime       String?
+  paymentReceiptUploadedAt DateTime?
   followUpNotes      FollowUpNote[]
   notifications      Notification[]
   country            Country               @relation(fields: [countryId], references: [id])

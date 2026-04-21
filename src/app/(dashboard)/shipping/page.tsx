@@ -4,9 +4,9 @@ import { useState, useMemo, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { format } from "date-fns";
+import { format, subDays } from "date-fns";
 import { arSA } from "date-fns/locale";
-import { Loader2, Truck, ExternalLink, RefreshCw, CheckSquare, X } from "lucide-react";
+import { Loader2, Truck, ExternalLink, RefreshCw, CheckSquare, X, CalendarIcon, ChevronDown, Search, Globe } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -16,6 +16,8 @@ import { Checkbox } from "@/components/ui/checkbox";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Calendar } from "@/components/ui/calendar";
 import { ShippingStatusDialog } from "@/components/shared/ShippingStatusDialog";
 import { cn } from "@/lib/utils";
 
@@ -63,6 +65,123 @@ type TabDef = {
 };
 
 
+// ─── Country multi-select ─────────────────────────────────────────────────────
+
+type CountryMode = "include" | "exclude";
+
+function CountryMultiSelect({
+  countries,
+  selectedIds,
+  mode,
+  onToggle,
+  onModeChange,
+  onClear,
+}: {
+  countries: Country[];
+  selectedIds: Set<string>;
+  mode: CountryMode;
+  onToggle: (id: string) => void;
+  onModeChange: (mode: CountryMode) => void;
+  onClear: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+
+  const filtered = useMemo(
+    () =>
+      search
+        ? countries.filter((c) => c.name.includes(search))
+        : countries,
+    [countries, search],
+  );
+
+  const label =
+    selectedIds.size === 0
+      ? "كل الدول"
+      : `${mode === "include" ? "تضمين" : "استثناء"} ${selectedIds.size} ${selectedIds.size === 1 ? "دولة" : "دول"}`;
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger
+        className={cn(
+          "inline-flex h-8 items-center gap-1.5 rounded-md border px-3 text-sm transition-colors min-w-[150px]",
+          selectedIds.size > 0
+            ? "border-primary bg-primary/10 text-primary"
+            : "border-input text-foreground hover:bg-muted",
+        )}
+      >
+        <Globe className="h-3.5 w-3.5 shrink-0" />
+        <span className="flex-1 text-right">{label}</span>
+        <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-60" />
+      </PopoverTrigger>
+      <PopoverContent className="w-64 p-0" align="start">
+        {/* Mode toggle */}
+        <div className="flex border-b">
+          {(["include", "exclude"] as const).map((m) => (
+            <button
+              key={m}
+              type="button"
+              onClick={() => onModeChange(m)}
+              className={cn(
+                "flex-1 py-2 text-xs font-medium transition-colors",
+                mode === m
+                  ? "bg-primary text-primary-foreground"
+                  : "hover:bg-muted text-muted-foreground",
+              )}
+            >
+              {m === "include" ? "تضمين" : "استثناء"}
+            </button>
+          ))}
+        </div>
+        {/* Search */}
+        <div className="flex items-center gap-2 px-3 py-2 border-b">
+          <Search className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+          <input
+            type="text"
+            placeholder="بحث..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+          />
+        </div>
+        {/* Country list */}
+        <div className="max-h-48 overflow-y-auto">
+          {filtered.map((c) => (
+            <button
+              key={c.id}
+              type="button"
+              onClick={() => onToggle(c.id)}
+              className="w-full flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-muted transition-colors"
+            >
+              <Checkbox
+                checked={selectedIds.has(c.id)}
+                onCheckedChange={() => onToggle(c.id)}
+                onClick={(e) => e.stopPropagation()}
+                className="shrink-0"
+              />
+              {c.name}
+            </button>
+          ))}
+          {filtered.length === 0 && (
+            <p className="px-3 py-4 text-center text-sm text-muted-foreground">لا توجد نتائج</p>
+          )}
+        </div>
+        {selectedIds.size > 0 && (
+          <div className="border-t p-2">
+            <button
+              type="button"
+              onClick={() => { onClear(); setOpen(false); }}
+              className="w-full text-xs text-muted-foreground hover:text-destructive transition-colors py-1"
+            >
+              مسح التحديد
+            </button>
+          </div>
+        )}
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function ShippingPage() {
@@ -71,7 +190,13 @@ export default function ShippingPage() {
   const router = useRouter();
 
   const [activeTab, setActiveTab] = useState("all");
-  const [selectedCountryId, setSelectedCountryId] = useState("");
+  const [selectedCountryIds, setSelectedCountryIds] = useState<Set<string>>(new Set());
+  const [countryMode, setCountryMode] = useState<CountryMode>("include");
+  // Date filter — "yyyy-MM-dd" strings; empty = no bound
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [dateFromOpen, setDateFromOpen] = useState(false);
+  const [dateToOpen, setDateToOpen] = useState(false);
   const [statusTarget, setStatusTarget] = useState<UnifiedOrder | null>(null);
   const [rowStatusLoading, setRowStatusLoading] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -101,6 +226,29 @@ export default function ShippingPage() {
   const role = session?.user?.role;
   const isAllowed = role === "ADMIN" || role === "SHIPPING";
 
+  // ── Date filter helpers ──
+  const todayStr     = format(new Date(), "yyyy-MM-dd");
+  const yesterdayStr = format(subDays(new Date(), 1), "yyyy-MM-dd");
+  const isToday     = dateFrom === todayStr     && dateTo === todayStr;
+  const isYesterday = dateFrom === yesterdayStr && dateTo === yesterdayStr;
+  const hasDateFilter = !!(dateFrom || dateTo);
+
+  const activeDateLabel = useMemo(() => {
+    if (!dateFrom && !dateTo) return null;
+    if (dateFrom && dateTo && dateFrom === dateTo)
+      return format(new Date(dateFrom), "d MMMM yyyy", { locale: arSA });
+    const from = dateFrom ? format(new Date(dateFrom), "d MMM", { locale: arSA }) : "...";
+    const to   = dateTo   ? format(new Date(dateTo),   "d MMM yyyy", { locale: arSA }) : "...";
+    return `${from} — ${to}`;
+  }, [dateFrom, dateTo]);
+
+  const handleDatePreset = (preset: "today" | "yesterday" | "clear") => {
+    setSelected(new Set());
+    if (preset === "today")     { setDateFrom(todayStr);     setDateTo(todayStr); }
+    else if (preset === "yesterday") { setDateFrom(yesterdayStr); setDateTo(yesterdayStr); }
+    else                        { setDateFrom("");            setDateTo(""); }
+  };
+
   // ── Lookups ──
   const { data: companies = [] } = useQuery<ShippingCompany[]>({
     queryKey: ["lookup-shipping-companies"],
@@ -123,12 +271,17 @@ export default function ShippingPage() {
     staleTime: 5 * 60_000,
   });
 
-  // ── All orders — re-fetched when country filter changes ──
+  // ── All orders — re-fetched when any filter changes ──
   const { data: allOrders = [], isLoading, refetch } = useQuery<UnifiedOrder[]>({
-    queryKey: ["shipping-all", selectedCountryId],
+    queryKey: ["shipping-all", countryMode, [...selectedCountryIds].sort().join(","), dateFrom, dateTo],
     queryFn: () => {
       const url = new URL("/api/shipping", window.location.origin);
-      if (selectedCountryId) url.searchParams.set("countryId", selectedCountryId);
+      if (selectedCountryIds.size > 0) {
+        url.searchParams.set("countryMode", countryMode);
+        url.searchParams.set("countryIds", [...selectedCountryIds].join(","));
+      }
+      if (dateFrom) url.searchParams.set("dateFrom", dateFrom);
+      if (dateTo)   url.searchParams.set("dateTo",   dateTo);
       return fetch(url.toString()).then((r) => r.json()).then((r) => r.data);
     },
     enabled: isAllowed,
@@ -283,9 +436,24 @@ export default function ShippingPage() {
     setSelected(new Set());
   };
 
-  // ── Country filter change ──
-  const handleCountryChange = (countryId: string) => {
-    setSelectedCountryId(countryId);
+  // ── Country filter handlers ──
+  const handleCountryToggle = (id: string) => {
+    setSelectedCountryIds((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+    setSelected(new Set());
+  };
+
+  const handleCountryModeChange = (mode: CountryMode) => {
+    setCountryMode(mode);
+    setSelectedCountryIds(new Set());
+    setSelected(new Set());
+  };
+
+  const handleCountryClear = () => {
+    setSelectedCountryIds(new Set());
     setSelected(new Set());
   };
 
@@ -299,35 +467,142 @@ export default function ShippingPage() {
         </Button>
       </div>
 
-      {/* Filter row: Country + active badges */}
-      <div className="flex flex-wrap items-center gap-3">
+      {/* Filter row: Country + Date + active badges */}
+      <div className="flex flex-wrap items-center gap-2">
+
+        {/* Country multi-select */}
         <div className="flex items-center gap-2">
           <label className="text-sm font-medium whitespace-nowrap">الدولة:</label>
-          <select
-            value={selectedCountryId}
-            onChange={(e) => handleCountryChange(e.target.value)}
-            className="h-8 rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1 min-w-[140px]"
-          >
-            <option value="">كل الدول</option>
-            {countries.map((c) => (
-              <option key={c.id} value={c.id}>{c.name}</option>
-            ))}
-          </select>
+          <CountryMultiSelect
+            countries={countries}
+            selectedIds={selectedCountryIds}
+            mode={countryMode}
+            onToggle={handleCountryToggle}
+            onModeChange={handleCountryModeChange}
+            onClear={handleCountryClear}
+          />
         </div>
 
+        {/* Visual separator */}
+        <span className="hidden sm:block h-5 w-px bg-border" aria-hidden="true" />
+
+        {/* Quick date presets */}
+        <div className="flex items-center gap-1.5">
+          <span className="text-sm font-medium text-muted-foreground whitespace-nowrap">التاريخ:</span>
+          <button
+            type="button"
+            onClick={() => handleDatePreset("today")}
+            className={cn(
+              "h-8 px-3 rounded-md border text-sm font-medium transition-colors",
+              isToday
+                ? "border-primary bg-primary text-primary-foreground"
+                : "border-input hover:bg-muted"
+            )}
+          >
+            اليوم
+          </button>
+          <button
+            type="button"
+            onClick={() => handleDatePreset("yesterday")}
+            className={cn(
+              "h-8 px-3 rounded-md border text-sm font-medium transition-colors",
+              isYesterday
+                ? "border-primary bg-primary text-primary-foreground"
+                : "border-input hover:bg-muted"
+            )}
+          >
+            أمس
+          </button>
+        </div>
+
+        {/* من تاريخ */}
+        <Popover open={dateFromOpen} onOpenChange={setDateFromOpen}>
+          <PopoverTrigger
+            className={cn(
+              "inline-flex h-8 items-center gap-1.5 rounded-md border px-3 text-sm transition-colors",
+              dateFrom && !isToday && !isYesterday
+                ? "border-primary bg-primary/10 text-primary"
+                : "border-input text-muted-foreground hover:bg-muted"
+            )}
+          >
+            <CalendarIcon className="h-3.5 w-3.5" />
+            {dateFrom ? format(new Date(dateFrom), "d MMM", { locale: arSA }) : "من تاريخ"}
+          </PopoverTrigger>
+          <PopoverContent className="w-auto p-0" align="start">
+            <Calendar
+              mode="single"
+              selected={dateFrom ? new Date(dateFrom) : undefined}
+              onDayClick={(d) => {
+                setDateFrom(format(d, "yyyy-MM-dd"));
+                setSelected(new Set());
+                setDateFromOpen(false);
+              }}
+              initialFocus
+            />
+          </PopoverContent>
+        </Popover>
+
+        {/* إلى تاريخ */}
+        <Popover open={dateToOpen} onOpenChange={setDateToOpen}>
+          <PopoverTrigger
+            className={cn(
+              "inline-flex h-8 items-center gap-1.5 rounded-md border px-3 text-sm transition-colors",
+              dateTo && !isToday && !isYesterday
+                ? "border-primary bg-primary/10 text-primary"
+                : "border-input text-muted-foreground hover:bg-muted"
+            )}
+          >
+            <CalendarIcon className="h-3.5 w-3.5" />
+            {dateTo ? format(new Date(dateTo), "d MMM", { locale: arSA }) : "إلى تاريخ"}
+          </PopoverTrigger>
+          <PopoverContent className="w-auto p-0" align="start">
+            <Calendar
+              mode="single"
+              selected={dateTo ? new Date(dateTo) : undefined}
+              onDayClick={(d) => {
+                setDateTo(format(d, "yyyy-MM-dd"));
+                setSelected(new Set());
+                setDateToOpen(false);
+              }}
+              initialFocus
+            />
+          </PopoverContent>
+        </Popover>
+
         {/* Active filter badges */}
-        {selectedCountryId && (() => {
-          const country = countries.find((c) => c.id === selectedCountryId);
-          return country ? (
+        {hasDateFilter && (
+          <button
+            type="button"
+            onClick={() => handleDatePreset("clear")}
+            className="inline-flex items-center gap-1 rounded-full bg-primary/10 text-primary px-2.5 py-0.5 text-xs font-medium hover:bg-primary/20 transition-colors"
+          >
+            <CalendarIcon className="h-3 w-3" />
+            {activeDateLabel}
+            <X className="h-3 w-3" />
+          </button>
+        )}
+
+        {selectedCountryIds.size > 0 && [...selectedCountryIds].map((id) => {
+          const country = countries.find((c) => c.id === id);
+          if (!country) return null;
+          return (
             <button
-              onClick={() => handleCountryChange("")}
-              className="inline-flex items-center gap-1 rounded-full bg-primary/10 text-primary px-2.5 py-0.5 text-xs font-medium hover:bg-primary/20 transition-colors"
+              key={id}
+              type="button"
+              onClick={() => handleCountryToggle(id)}
+              className={cn(
+                "inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium transition-colors",
+                countryMode === "exclude"
+                  ? "bg-destructive/10 text-destructive hover:bg-destructive/20"
+                  : "bg-primary/10 text-primary hover:bg-primary/20",
+              )}
             >
-              الدولة: {country.name}
+              {countryMode === "exclude" && <span className="opacity-70">≠</span>}
+              {country.name}
               <X className="h-3 w-3" />
             </button>
-          ) : null;
-        })()}
+          );
+        })}
       </div>
 
       {/* Tab bar — scrollable, dynamic */}
@@ -434,22 +709,34 @@ export default function ShippingPage() {
             ) : filteredOrders.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={12} className="text-center py-12 text-muted-foreground">
-                  <div className="space-y-1">
+                  <div className="space-y-1.5">
                     <p>لا توجد طلبات تطابق الفلاتر المحددة</p>
-                    {(selectedCountryId || activeTab !== "all") && (
-                      <p className="text-xs">
-                        جرب{" "}
-                        {selectedCountryId && (
+                    {(hasDateFilter || selectedCountryIds.size > 0 || activeTab !== "all") && (
+                      <p className="text-xs flex flex-wrap justify-center gap-x-1">
+                        <span>جرب:</span>
+                        {hasDateFilter && (
                           <button
-                            onClick={() => handleCountryChange("")}
+                            type="button"
+                            onClick={() => handleDatePreset("clear")}
+                            className="underline hover:text-foreground"
+                          >
+                            توسيع نطاق التاريخ
+                          </button>
+                        )}
+                        {hasDateFilter && (selectedCountryIds.size > 0 || activeTab !== "all") && <span>·</span>}
+                        {selectedCountryIds.size > 0 && (
+                          <button
+                            type="button"
+                            onClick={handleCountryClear}
                             className="underline hover:text-foreground"
                           >
                             إلغاء فلتر الدولة
                           </button>
                         )}
-                        {selectedCountryId && activeTab !== "all" && " أو "}
+                        {selectedCountryIds.size > 0 && activeTab !== "all" && <span>·</span>}
                         {activeTab !== "all" && (
                           <button
+                            type="button"
                             onClick={() => handleTabChange("all")}
                             className="underline hover:text-foreground"
                           >

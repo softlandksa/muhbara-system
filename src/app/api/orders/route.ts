@@ -18,6 +18,8 @@ const createOrderSchema = z.object({
   notes: z.string().optional(),
   isRepeatCustomer: z.boolean().optional(),
   repeatCustomerNote: z.string().optional(),
+  paymentReceiptUrl: z.string().url().optional(),
+  paymentReceiptMime: z.string().optional(),
   items: z
     .array(
       z.object({
@@ -139,7 +141,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const { orderDate, customerName, phone, address, countryId, currencyId, paymentMethodId, notes, isRepeatCustomer, repeatCustomerNote, items } = parsed.data;
+  const { orderDate, customerName, phone, address, countryId, currencyId, paymentMethodId, notes, isRepeatCustomer, repeatCustomerNote, paymentReceiptUrl, paymentReceiptMime, items } = parsed.data;
 
   // Parallel: validate country + look up initial status — independent queries.
   const [country, initialStatus] = await Promise.all([
@@ -181,6 +183,9 @@ export async function POST(request: NextRequest) {
           notes: notes ?? null,
           isRepeatCustomer: isRepeatCustomer ?? false,
           repeatCustomerNote: repeatCustomerNote ?? null,
+          paymentReceiptUrl: paymentReceiptUrl ?? null,
+          paymentReceiptMime: paymentReceiptMime ?? null,
+          paymentReceiptUploadedAt: paymentReceiptUrl ? new Date() : null,
           createdById: userId,
           teamId: teamId ?? null,
           items: {
@@ -203,6 +208,17 @@ export async function POST(request: NextRequest) {
           changedAt: new Date(),
         },
       });
+
+      if (paymentReceiptUrl) {
+        await tx.orderAuditLog.create({
+          data: {
+            orderId: created.id,
+            action: "RECEIPT_UPLOADED",
+            changedById: userId,
+            changedAt: new Date(),
+          },
+        });
+      }
 
       return created;
     });

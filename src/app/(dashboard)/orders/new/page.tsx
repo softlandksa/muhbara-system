@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect, useRef } from "react";
+import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { useForm, useFieldArray, useWatch } from "react-hook-form";
@@ -12,6 +12,7 @@ import { arSA } from "date-fns/locale";
 import {
   CalendarIcon, Plus, Trash2, Loader2, ArrowRight,
   AlertTriangle, CheckCircle2, AlertCircle, ExternalLink,
+  Upload, FileText, X, Image as ImageIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -219,6 +220,113 @@ function DuplicateAlert({
   );
 }
 
+// ─── Receipt Upload Component ─────────────────────────────────────────────────
+
+const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp", "application/pdf"];
+const MAX_SIZE = 10 * 1024 * 1024;
+
+function ReceiptUpload({
+  file,
+  previewUrl,
+  error,
+  onFileChange,
+  onClear,
+}: {
+  file: File | null;
+  previewUrl: string | null;
+  error: string | null;
+  onFileChange: (f: File) => void;
+  onClear: () => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [dragging, setDragging] = useState(false);
+
+  const validate = (f: File): string | null => {
+    if (f.size > MAX_SIZE) return "حجم الملف يتجاوز الحد المسموح به (10 ميغابايت)";
+    if (!ALLOWED_TYPES.includes(f.type)) return "نوع الملف غير مدعوم. الأنواع المقبولة: JPG، PNG، WebP، PDF";
+    return null;
+  };
+
+  const handle = (f: File) => {
+    const err = validate(f);
+    if (!err) onFileChange(f);
+    else onFileChange(Object.assign(f, { _validationError: err }) as File);
+  };
+
+  const onDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setDragging(false);
+    const f = e.dataTransfer.files[0];
+    if (f) handle(f);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const onInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    if (f) handle(f);
+    e.target.value = "";
+  };
+
+  const isPdf = file?.type === "application/pdf";
+
+  return (
+    <div className="space-y-2">
+      {!file ? (
+        <div
+          onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+          onDragLeave={() => setDragging(false)}
+          onDrop={onDrop}
+          onClick={() => inputRef.current?.click()}
+          className={cn(
+            "flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed px-6 py-8 cursor-pointer transition-colors text-sm",
+            dragging ? "border-primary bg-primary/5" : "border-muted-foreground/30 hover:border-primary/50 hover:bg-muted/40"
+          )}
+        >
+          <Upload className="h-8 w-8 text-muted-foreground/60" />
+          <p className="font-medium text-muted-foreground">اسحب الملف هنا أو اضغط للاختيار</p>
+          <p className="text-xs text-muted-foreground/60">JPG، PNG، WebP، PDF — حتى 10 ميغابايت</p>
+        </div>
+      ) : (
+        <div className="rounded-lg border bg-muted/30 p-3 flex items-start gap-3">
+          {isPdf ? (
+            <div className="flex-shrink-0 w-14 h-14 rounded-md bg-red-50 border border-red-200 flex items-center justify-center">
+              <FileText className="h-7 w-7 text-red-500" />
+            </div>
+          ) : previewUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={previewUrl} alt="معاينة الإيصال" className="w-14 h-14 object-cover rounded-md border" />
+          ) : (
+            <div className="flex-shrink-0 w-14 h-14 rounded-md bg-blue-50 border border-blue-200 flex items-center justify-center">
+              <ImageIcon className="h-7 w-7 text-blue-400" />
+            </div>
+          )}
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium truncate">{file.name}</p>
+            <p className="text-xs text-muted-foreground">{(file.size / 1024).toFixed(0)} كيلوبايت</p>
+          </div>
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); onClear(); }}
+            className="flex-shrink-0 rounded-full p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors"
+            aria-label="إزالة الملف"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      )}
+
+      {error && <p className="text-xs text-destructive">{error}</p>}
+
+      <input
+        ref={inputRef}
+        type="file"
+        className="hidden"
+        accept="image/jpeg,image/png,image/webp,application/pdf"
+        onChange={onInputChange}
+      />
+    </div>
+  );
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function NewOrderPage() {
@@ -237,6 +345,37 @@ export default function NewOrderPage() {
   const dupTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const role = session?.user?.role;
+
+  // ── Receipt upload state ──
+  const [receiptFile, setReceiptFile] = useState<File | null>(null);
+  const [receiptPreviewUrl, setReceiptPreviewUrl] = useState<string | null>(null);
+  const [receiptError, setReceiptError] = useState<string | null>(null);
+
+  const handleReceiptChange = (f: File) => {
+    // Check for client-side validation error attached to File object
+    const err = (f as File & { _validationError?: string })._validationError;
+    if (err) {
+      setReceiptError(err);
+      setReceiptFile(null);
+      setReceiptPreviewUrl(null);
+      return;
+    }
+    setReceiptError(null);
+    setReceiptFile(f);
+    if (f.type !== "application/pdf") {
+      const url = URL.createObjectURL(f);
+      setReceiptPreviewUrl(url);
+    } else {
+      setReceiptPreviewUrl(null);
+    }
+  };
+
+  const handleReceiptClear = () => {
+    setReceiptFile(null);
+    if (receiptPreviewUrl) URL.revokeObjectURL(receiptPreviewUrl);
+    setReceiptPreviewUrl(null);
+    setReceiptError(null);
+  };
 
   const { register, control, handleSubmit, setValue, watch, formState: { errors } } = useForm<OrderFormData>({
     resolver: zodResolver(orderSchema),
@@ -357,6 +496,20 @@ export default function NewOrderPage() {
   // ── Mutation ──
   const mutation = useMutation({
     mutationFn: async (data: OrderFormData) => {
+      // Step 1: upload receipt if provided
+      let paymentReceiptUrl: string | undefined;
+      let paymentReceiptMime: string | undefined;
+      if (receiptFile) {
+        const fd = new FormData();
+        fd.append("file", receiptFile);
+        const uploadRes = await fetch("/api/upload/receipt", { method: "POST", body: fd });
+        const uploadJson: { data?: { storedUrl: string; mime: string }; error?: string } = await uploadRes.json().catch(() => ({}));
+        if (!uploadRes.ok) throw new Error(uploadJson.error ?? "فشل رفع إيصال السداد");
+        paymentReceiptUrl = uploadJson.data?.storedUrl;
+        paymentReceiptMime = uploadJson.data?.mime;
+      }
+
+      // Step 2: create order
       const res = await fetch("/api/orders", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -365,6 +518,7 @@ export default function NewOrderPage() {
           orderDate: data.orderDate.toISOString(),
           isRepeatCustomer,
           repeatCustomerNote,
+          ...(paymentReceiptUrl && { paymentReceiptUrl, paymentReceiptMime }),
         }),
       });
       let json: { data?: { id: string }; error?: string } = {};
@@ -649,6 +803,26 @@ export default function NewOrderPage() {
                 </div>
               </div>
             </div>
+          </CardContent>
+        </Card>
+
+        {/* Receipt Upload */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Upload className="h-4 w-4" />
+              إيصال السداد <span className="text-sm font-normal text-muted-foreground">(اختياري)</span>
+            </CardTitle>
+            <p className="text-sm text-muted-foreground">ارفع صورة أو PDF لإيصال التحويل أو الدفع</p>
+          </CardHeader>
+          <CardContent>
+            <ReceiptUpload
+              file={receiptFile}
+              previewUrl={receiptPreviewUrl}
+              error={receiptError}
+              onFileChange={handleReceiptChange}
+              onClear={handleReceiptClear}
+            />
           </CardContent>
         </Card>
 

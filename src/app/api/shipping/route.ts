@@ -52,12 +52,37 @@ export async function GET(request: NextRequest) {
   }
 
   const { searchParams } = new URL(request.url);
-  const statusId  = searchParams.get("statusId");
-  const countryId = searchParams.get("countryId");
+  const statusId   = searchParams.get("statusId");
+  const dateFrom   = searchParams.get("dateFrom");    // "yyyy-MM-dd" inclusive start (UTC 00:00Z)
+  const dateTo     = searchParams.get("dateTo");      // "yyyy-MM-dd" inclusive end   (UTC 23:59:59.999Z)
+  // Multi-country filter — countryMode: "include" (IN) | "exclude" (NOT IN).
+  // countryIds: comma-separated cuid list, max 30.
+  // NULL policy: countryId is non-nullable on Order, so no NULL edge-case applies.
+  const countryMode = (searchParams.get("countryMode") ?? "include") as "include" | "exclude";
+  const countryIdsRaw = searchParams.get("countryIds") ?? "";
+  const countryIds = countryIdsRaw
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .slice(0, 30); // hard cap — prevent oversized IN clauses
 
   const where: Record<string, unknown> = { deletedAt: null };
-  if (statusId)  where.statusId  = statusId;
-  if (countryId) where.countryId = countryId;
+  if (statusId) where.statusId = statusId;
+
+  if (countryIds.length > 0) {
+    where.countryId = countryMode === "exclude"
+      ? { notIn: countryIds }
+      : { in: countryIds };
+  }
+
+  // Date filter on orderDate (business date — same column the board shows as «التاريخ»).
+  // Bounds use explicit UTC suffix so behaviour is timezone-independent on the server.
+  if (dateFrom || dateTo) {
+    const dateFilter: { gte?: Date; lte?: Date } = {};
+    if (dateFrom) dateFilter.gte = new Date(dateFrom);
+    if (dateTo)   dateFilter.lte = new Date(dateTo + "T23:59:59.999Z");
+    where.orderDate = dateFilter;
+  }
 
   const data = await prisma.order.findMany({
     where,

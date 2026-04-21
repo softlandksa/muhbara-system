@@ -55,10 +55,8 @@ export async function GET(request: NextRequest) {
   const statusId   = searchParams.get("statusId");
   const dateFrom   = searchParams.get("dateFrom");    // "yyyy-MM-dd" inclusive start (UTC 00:00Z)
   const dateTo     = searchParams.get("dateTo");      // "yyyy-MM-dd" inclusive end   (UTC 23:59:59.999Z)
-  // Multi-country filter — countryMode: "include" (IN) | "exclude" (NOT IN).
-  // countryIds: comma-separated cuid list, max 30.
+  // Multi-country inclusion filter — countryIds: comma-separated cuid list, max 30.
   // NULL policy: countryId is non-nullable on Order, so no NULL edge-case applies.
-  const countryMode = (searchParams.get("countryMode") ?? "include") as "include" | "exclude";
   const countryIdsRaw = searchParams.get("countryIds") ?? "";
   const countryIds = countryIdsRaw
     .split(",")
@@ -70,9 +68,7 @@ export async function GET(request: NextRequest) {
   if (statusId) where.statusId = statusId;
 
   if (countryIds.length > 0) {
-    where.countryId = countryMode === "exclude"
-      ? { notIn: countryIds }
-      : { in: countryIds };
+    where.countryId = { in: countryIds };
   }
 
   // Date filter on orderDate (business date — same column the board shows as «التاريخ»).

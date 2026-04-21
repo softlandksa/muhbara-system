@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -67,25 +67,20 @@ type TabDef = {
 
 // ─── Country multi-select ─────────────────────────────────────────────────────
 
-type CountryMode = "include" | "exclude";
-
 function CountryMultiSelect({
   countries,
   selectedIds,
-  mode,
   onToggle,
-  onModeChange,
   onClear,
 }: {
   countries: Country[];
   selectedIds: Set<string>;
-  mode: CountryMode;
   onToggle: (id: string) => void;
-  onModeChange: (mode: CountryMode) => void;
   onClear: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
+  const searchRef = useRef<HTMLInputElement>(null);
 
   const filtered = useMemo(
     () =>
@@ -98,7 +93,7 @@ function CountryMultiSelect({
   const label =
     selectedIds.size === 0
       ? "كل الدول"
-      : `${mode === "include" ? "تضمين" : "استثناء"} ${selectedIds.size} ${selectedIds.size === 1 ? "دولة" : "دول"}`;
+      : `${selectedIds.size} ${selectedIds.size === 1 ? "دولة" : "دول"}`;
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -115,34 +110,30 @@ function CountryMultiSelect({
         <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-60" />
       </PopoverTrigger>
       <PopoverContent className="w-64 p-0" align="start">
-        {/* Mode toggle */}
-        <div className="flex border-b">
-          {(["include", "exclude"] as const).map((m) => (
-            <button
-              key={m}
-              type="button"
-              onClick={() => onModeChange(m)}
-              className={cn(
-                "flex-1 py-2 text-xs font-medium transition-colors",
-                mode === m
-                  ? "bg-primary text-primary-foreground"
-                  : "hover:bg-muted text-muted-foreground",
-              )}
-            >
-              {m === "include" ? "تضمين" : "استثناء"}
-            </button>
-          ))}
-        </div>
         {/* Search */}
         <div className="flex items-center gap-2 px-3 py-2 border-b">
           <Search className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
           <input
+            ref={searchRef}
             type="text"
             placeholder="بحث..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+            className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground ps-0 pe-1"
           />
+          {search && (
+            <button
+              type="button"
+              onClick={() => {
+                setSearch("");
+                searchRef.current?.focus();
+              }}
+              className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
+              aria-label="مسح البحث"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          )}
         </div>
         {/* Country list */}
         <div className="max-h-48 overflow-y-auto">
@@ -151,7 +142,7 @@ function CountryMultiSelect({
               key={c.id}
               type="button"
               onClick={() => onToggle(c.id)}
-              className="w-full flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-muted transition-colors"
+              className="w-full flex items-center gap-2 px-3 py-1.5 text-sm cursor-pointer hover:bg-accent/80 hover:shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
             >
               <Checkbox
                 checked={selectedIds.has(c.id)}
@@ -191,7 +182,6 @@ export default function ShippingPage() {
 
   const [activeTab, setActiveTab] = useState("all");
   const [selectedCountryIds, setSelectedCountryIds] = useState<Set<string>>(new Set());
-  const [countryMode, setCountryMode] = useState<CountryMode>("include");
   // Date filter — "yyyy-MM-dd" strings; empty = no bound
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
@@ -273,11 +263,10 @@ export default function ShippingPage() {
 
   // ── All orders — re-fetched when any filter changes ──
   const { data: allOrders = [], isLoading, refetch } = useQuery<UnifiedOrder[]>({
-    queryKey: ["shipping-all", countryMode, [...selectedCountryIds].sort().join(","), dateFrom, dateTo],
+    queryKey: ["shipping-all", [...selectedCountryIds].sort().join(","), dateFrom, dateTo],
     queryFn: () => {
       const url = new URL("/api/shipping", window.location.origin);
       if (selectedCountryIds.size > 0) {
-        url.searchParams.set("countryMode", countryMode);
         url.searchParams.set("countryIds", [...selectedCountryIds].join(","));
       }
       if (dateFrom) url.searchParams.set("dateFrom", dateFrom);
@@ -446,12 +435,6 @@ export default function ShippingPage() {
     setSelected(new Set());
   };
 
-  const handleCountryModeChange = (mode: CountryMode) => {
-    setCountryMode(mode);
-    setSelectedCountryIds(new Set());
-    setSelected(new Set());
-  };
-
   const handleCountryClear = () => {
     setSelectedCountryIds(new Set());
     setSelected(new Set());
@@ -476,9 +459,7 @@ export default function ShippingPage() {
           <CountryMultiSelect
             countries={countries}
             selectedIds={selectedCountryIds}
-            mode={countryMode}
             onToggle={handleCountryToggle}
-            onModeChange={handleCountryModeChange}
             onClear={handleCountryClear}
           />
         </div>
@@ -590,14 +571,8 @@ export default function ShippingPage() {
               key={id}
               type="button"
               onClick={() => handleCountryToggle(id)}
-              className={cn(
-                "inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium transition-colors",
-                countryMode === "exclude"
-                  ? "bg-destructive/10 text-destructive hover:bg-destructive/20"
-                  : "bg-primary/10 text-primary hover:bg-primary/20",
-              )}
+              className="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium transition-colors bg-primary/10 text-primary hover:bg-primary/20"
             >
-              {countryMode === "exclude" && <span className="opacity-70">≠</span>}
               {country.name}
               <X className="h-3 w-3" />
             </button>

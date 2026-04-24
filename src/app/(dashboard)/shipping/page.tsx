@@ -6,7 +6,7 @@ import { useSession } from "next-auth/react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { format, subDays } from "date-fns";
 import { arSA } from "date-fns/locale";
-import { Loader2, Truck, ExternalLink, RefreshCw, CheckSquare, X, CalendarIcon, ChevronDown, Search, Globe } from "lucide-react";
+import { Loader2, Truck, ExternalLink, RefreshCw, CheckSquare, X, CalendarIcon, ChevronDown, Search, Globe, Pencil, Save, Users } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -19,6 +19,8 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 import { ShippingStatusDialog } from "@/components/shared/ShippingStatusDialog";
+import { SearchInput } from "@/components/ui/search-input";
+import { normalizePhone, parseMultiPhone } from "@/lib/phone";
 import { cn } from "@/lib/utils";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -197,6 +199,17 @@ export default function ShippingPage() {
   const [bulkLoading, setBulkLoading] = useState(false);
   const [bulkSelectedIds, setBulkSelectedIds] = useState<string[]>([]);
 
+  // ── Search ──
+  const [searchQuery, setSearchQuery] = useState("");
+
+  // ── Inline tracking edit ──
+  const [editingTrackingId, setEditingTrackingId] = useState<string | null>(null);
+  const [trackingDraft, setTrackingDraft] = useState("");
+  const [trackingSavingIds, setTrackingSavingIds] = useState<Set<string>>(new Set());
+
+  // ── Duplicate customers filter ──
+  const [duplicatesOnly, setDuplicatesOnly] = useState(false);
+
   // Safety: clear any residual overflow lock base-ui sets on body during dialog close.
   // Two passes: immediate (catches fast closes) + 150ms (catches animated closes).
   const anyDialogOpen = !!statusTarget || rowStatusLoading || bulkStatusOpen || bulkLoading;
@@ -290,30 +303,72 @@ export default function ShippingPage() {
     })),
   ], [shippingStatuses]);
 
-  // ── Tab counts — computed from all orders ──
+  // ── Search: filter allOrders before tab split so tab counts reflect search ──
+  const multiPhones = useMemo(() => parseMultiPhone(searchQuery), [searchQuery]);
+
+  const allSearched = useMemo(() => {
+    if (!searchQuery) return allOrders;
+    if (multiPhones) {
+      const phoneSet = new Set(multiPhones);
+      return allOrders.filter((o) => phoneSet.has(normalizePhone(o.phone)));
+    }
+    const q = searchQuery.toLowerCase();
+    const np = normalizePhone(searchQuery);
+    return allOrders.filter(
+      (o) =>
+        o.customerName.toLowerCase().includes(q) ||
+        (np.length >= 3 && normalizePhone(o.phone).includes(np)),
+    );
+  }, [allOrders, searchQuery, multiPhones]);
+
+  // Multi-phone hit/miss report — shown when pasting multiple phone numbers
+  const multiPhoneReport = useMemo(() => {
+    if (!multiPhones) return null;
+    const found = new Set(allSearched.map((o) => normalizePhone(o.phone)));
+    return multiPhones.map((p) => ({ phone: p, found: found.has(p) }));
+  }, [multiPhones, allSearched]);
+
+  // ── Tab counts — computed from searched orders ──
   const tabCounts = useMemo(() => {
-    const counts: Record<string, number> = { all: allOrders.length };
-    for (const order of allOrders) {
+    const counts: Record<string, number> = { all: allSearched.length };
+    for (const order of allSearched) {
       const ssKey = `ss-${order.status.id}`;
       counts[ssKey] = (counts[ssKey] ?? 0) + 1;
     }
     return counts;
-  }, [allOrders]);
+  }, [allSearched]);
 
   // ── Visible tabs — hide SS tabs with 0 orders ──
   const visibleTabs = useMemo(() =>
     allTabs.filter((tab) => tab.id === "all" || (tabCounts[tab.id] ?? 0) > 0),
   [allTabs, tabCounts]);
 
-  // ── Filtered orders for active tab ──
-  const filteredOrders = useMemo(() => {
-    if (activeTab === "all") return allOrders;
-    if (activeTab.startsWith("ss-")) {
-      const ssId = activeTab.slice(3);
-      return allOrders.filter((o) => o.status.id === ssId);
+  // ── Tab filter ──
+  const tabFiltered = useMemo(() => {
+    if (activeTab === "all") return allSearched;
+    const ssId = activeTab.slice(3);
+    return allSearched.filter((o) => o.status.id === ssId);
+  }, [allSearched, activeTab]);
+
+  // ── Duplicate phone groups (within current tab+search view) ──
+  const duplicatePhoneSet = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const o of tabFiltered) {
+      const n = normalizePhone(o.phone);
+      if (n) counts.set(n, (counts.get(n) ?? 0) + 1);
     }
-    return allOrders;
-  }, [allOrders, activeTab]);
+    const dup = new Set<string>();
+    for (const [phone, cnt] of counts) {
+      if (cnt >= 2) dup.add(phone);
+    }
+    return dup;
+  }, [tabFiltered]);
+
+  // ── Final filtered orders ──
+  const filteredOrders = useMemo(() => {
+    if (!duplicatesOnly) return tabFiltered;
+    return tabFiltered.filter((o) => duplicatePhoneSet.has(normalizePhone(o.phone)));
+  }, [tabFiltered, duplicatesOnly, duplicatePhoneSet]);
 
   // ── Selection ──
   const allFilteredIds = filteredOrders.map((o) => o.id);
@@ -386,6 +441,43 @@ export default function ShippingPage() {
     invalidateAll();
   };
 
+  // ── Inline tracking save ──
+  const handleSaveTracking = async (orderId: string) => {
+    setTrackingSavingIds((prev) => new Set([...prev, orderId]));
+    try {
+      const res = await fetch(`/api/shipping/orders/${orderId}/tracking`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ trackingNumber: trackingDraft.trim() || null }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        toast.error(json.error ?? "فشل حفظ رقم التتبع");
+        return;
+      }
+      const newTracking: string | null = json.data.trackingNumber;
+      queryClient.setQueriesData<UnifiedOrder[]>(
+        { queryKey: ["shipping-all"], exact: false },
+        (old) =>
+          old?.map((o) =>
+            o.id === orderId && o.shippingInfo
+              ? { ...o, shippingInfo: { ...o.shippingInfo, trackingNumber: newTracking } }
+              : o,
+          ),
+      );
+      toast.success("تم حفظ رقم التتبع");
+      setEditingTrackingId(null);
+    } catch {
+      toast.error("حدث خطأ في الاتصال");
+    } finally {
+      setTrackingSavingIds((prev) => {
+        const n = new Set(prev);
+        n.delete(orderId);
+        return n;
+      });
+    }
+  };
+
   const openBulkStatusDialog = () => {
     const ids = filteredOrders.filter((o) => selected.has(o.id)).map((o) => o.id);
     setBulkSelectedIds(ids);
@@ -423,6 +515,14 @@ export default function ShippingPage() {
   const handleTabChange = (tabId: string) => {
     setActiveTab(tabId);
     setSelected(new Set());
+    setEditingTrackingId(null);
+  };
+
+  // ── Search change ──
+  const handleSearchChange = (value: string) => {
+    setSearchQuery(value);
+    setSelected(new Set());
+    setEditingTrackingId(null);
   };
 
   // ── Country filter handlers ──
@@ -450,7 +550,43 @@ export default function ShippingPage() {
         </Button>
       </div>
 
-      {/* Filter row: Country + Date + active badges */}
+      {/* Search row */}
+      <div className="flex items-center gap-2">
+        <SearchInput
+          value={searchQuery}
+          onChange={handleSearchChange}
+          placeholder="بحث بالاسم أو رقم الهاتف…"
+          isSearching={isLoading && !!searchQuery}
+          className="w-full sm:w-72"
+          dir="rtl"
+        />
+        {searchQuery && (
+          <span className="text-xs text-muted-foreground whitespace-nowrap">
+            {filteredOrders.length} نتيجة
+          </span>
+        )}
+      </div>
+
+      {/* Multi-phone hit/miss report */}
+      {multiPhoneReport && (
+        <div className="flex flex-wrap gap-1.5 text-xs">
+          {multiPhoneReport.map(({ phone, found }) => (
+            <span
+              key={phone}
+              className={cn(
+                "inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-mono",
+                found
+                  ? "bg-green-100 text-green-700"
+                  : "bg-red-100 text-red-600",
+              )}
+            >
+              {found ? "✓" : "✗"} {phone}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {/* Filter row: Country + Date + Duplicate toggle + active badges */}
       <div className="flex flex-wrap items-center gap-2">
 
         {/* Country multi-select */}
@@ -463,6 +599,23 @@ export default function ShippingPage() {
             onClear={handleCountryClear}
           />
         </div>
+
+        {/* Duplicate customers toggle */}
+        <button
+          type="button"
+          onClick={() => { setDuplicatesOnly((prev) => !prev); setSelected(new Set()); }}
+          className={cn(
+            "inline-flex h-8 items-center gap-1.5 rounded-md border px-3 text-sm font-medium transition-colors",
+            duplicatesOnly
+              ? "border-orange-400 bg-orange-50 text-orange-700"
+              : "border-input hover:bg-muted text-muted-foreground",
+          )}
+          title="إظهار العملاء المكررين فقط"
+        >
+          <Users className="h-3.5 w-3.5 shrink-0" />
+          عملاء مكررون
+          {duplicatesOnly && <X className="h-3.5 w-3.5" />}
+        </button>
 
         {/* Visual separator */}
         <span className="hidden sm:block h-5 w-px bg-border" aria-hidden="true" />
@@ -686,9 +839,19 @@ export default function ShippingPage() {
                 <TableCell colSpan={12} className="text-center py-12 text-muted-foreground">
                   <div className="space-y-1.5">
                     <p>لا توجد طلبات تطابق الفلاتر المحددة</p>
-                    {(hasDateFilter || selectedCountryIds.size > 0 || activeTab !== "all") && (
+                    {(hasDateFilter || selectedCountryIds.size > 0 || activeTab !== "all" || searchQuery || duplicatesOnly) && (
                       <p className="text-xs flex flex-wrap justify-center gap-x-1">
                         <span>جرب:</span>
+                        {searchQuery && (
+                          <button
+                            type="button"
+                            onClick={() => handleSearchChange("")}
+                            className="underline hover:text-foreground"
+                          >
+                            مسح البحث
+                          </button>
+                        )}
+                        {searchQuery && hasDateFilter && <span>·</span>}
                         {hasDateFilter && (
                           <button
                             type="button"
@@ -718,6 +881,18 @@ export default function ShippingPage() {
                             عرض كل الحالات
                           </button>
                         )}
+                        {duplicatesOnly && (
+                          <>
+                            <span>·</span>
+                            <button
+                              type="button"
+                              onClick={() => setDuplicatesOnly(false)}
+                              className="underline hover:text-foreground"
+                            >
+                              إلغاء فلتر المكررين
+                            </button>
+                          </>
+                        )}
                       </p>
                     )}
                   </div>
@@ -740,7 +915,17 @@ export default function ShippingPage() {
                   <TableCell className="font-mono text-sm">{order.orderNumber}</TableCell>
 
                   <TableCell>
-                    <div className="font-medium">{order.customerName}</div>
+                    <div className="font-medium flex items-center gap-1 flex-wrap">
+                      {order.customerName}
+                      {duplicatePhoneSet.has(normalizePhone(order.phone)) && (
+                        <Badge
+                          variant="outline"
+                          className="text-[10px] px-1 py-0 h-4 border-orange-400 text-orange-600 bg-orange-50 shrink-0"
+                        >
+                          مكرر
+                        </Badge>
+                      )}
+                    </div>
                     <div className="text-xs text-muted-foreground" dir="ltr">{order.phone}</div>
                   </TableCell>
 
@@ -763,35 +948,86 @@ export default function ShippingPage() {
                     </Badge>
                   </TableCell>
 
-                  {/* Shipping company + tracking */}
-                  <TableCell>
+                  {/* Shipping company + tracking (inline edit) */}
+                  <TableCell onClick={(e) => e.stopPropagation()}>
                     {order.shippingInfo ? (
                       <div>
                         <div className="text-sm font-medium">{order.shippingInfo.shippingCompany.name}</div>
-                        <div className="flex items-center gap-1 mt-0.5" dir="ltr">
-                          {order.shippingInfo.trackingNumber ? (
-                            <>
-                              <span className="font-mono text-xs text-muted-foreground">
-                                {order.shippingInfo.trackingNumber}
-                              </span>
-                              {order.shippingInfo.shippingCompany.trackingUrl && (
-                                <a
-                                  href={order.shippingInfo.shippingCompany.trackingUrl.replace(
-                                    "{tracking}",
-                                    order.shippingInfo.trackingNumber
-                                  )}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="text-primary hover:text-primary/80"
-                                >
-                                  <ExternalLink className="h-3 w-3" />
-                                </a>
+                        {editingTrackingId === order.id ? (
+                          <div className="flex items-center gap-1 mt-1" dir="ltr">
+                            <input
+                              autoFocus
+                              value={trackingDraft}
+                              onChange={(e) => setTrackingDraft(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") handleSaveTracking(order.id);
+                                if (e.key === "Escape") setEditingTrackingId(null);
+                              }}
+                              placeholder="رقم التتبع (اختياري)"
+                              maxLength={100}
+                              dir="ltr"
+                              className="h-6 w-32 rounded border border-input bg-transparent px-1.5 text-xs font-mono outline-none focus:border-ring focus:ring-1 focus:ring-ring/50"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => handleSaveTracking(order.id)}
+                              disabled={trackingSavingIds.has(order.id)}
+                              title="حفظ"
+                              className="flex shrink-0 text-primary hover:text-primary/80 disabled:opacity-50 transition-colors"
+                            >
+                              {trackingSavingIds.has(order.id) ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              ) : (
+                                <Save className="h-3.5 w-3.5" />
                               )}
-                            </>
-                          ) : (
-                            <span className="text-xs text-muted-foreground">—</span>
-                          )}
-                        </div>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setEditingTrackingId(null)}
+                              title="إلغاء"
+                              className="flex shrink-0 text-muted-foreground hover:text-foreground transition-colors"
+                            >
+                              <X className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-1 mt-0.5" dir="ltr">
+                            {order.shippingInfo.trackingNumber ? (
+                              <>
+                                <span className="font-mono text-xs text-muted-foreground">
+                                  {order.shippingInfo.trackingNumber}
+                                </span>
+                                {order.shippingInfo.shippingCompany.trackingUrl && (
+                                  <a
+                                    href={order.shippingInfo.shippingCompany.trackingUrl.replace(
+                                      "{tracking}",
+                                      order.shippingInfo.trackingNumber,
+                                    )}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    onClick={(e) => e.stopPropagation()}
+                                    className="text-primary hover:text-primary/80"
+                                  >
+                                    <ExternalLink className="h-3 w-3" />
+                                  </a>
+                                )}
+                              </>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">—</span>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingTrackingId(order.id);
+                                setTrackingDraft(order.shippingInfo?.trackingNumber ?? "");
+                              }}
+                              title="تعديل رقم التتبع"
+                              className="flex shrink-0 text-muted-foreground hover:text-foreground transition-colors"
+                            >
+                              <Pencil className="h-3 w-3" />
+                            </button>
+                          </div>
+                        )}
                       </div>
                     ) : (
                       <span className="text-muted-foreground">—</span>

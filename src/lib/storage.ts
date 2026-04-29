@@ -65,7 +65,7 @@ function mimeFromExt(ext: string): string {
   );
 }
 
-export type UploadResult = { storedUrl: string; mime: string };
+export type UploadResult = { storedUrl: string; mime: string; size: number };
 
 export async function uploadReceipt(fileBuffer: ArrayBuffer, claimedMime: string): Promise<UploadResult> {
   const buf = new Uint8Array(fileBuffer);
@@ -99,7 +99,7 @@ export async function uploadReceipt(fileBuffer: ArrayBuffer, claimedMime: string
       contentType: claimedMime,
       token: process.env.BLOB_READ_WRITE_TOKEN,
     });
-    return { storedUrl: blob.url, mime: claimedMime };
+    return { storedUrl: blob.url, mime: claimedMime, size: buf.length };
   }
 
   // Local filesystem fallback — development only.
@@ -107,7 +107,7 @@ export async function uploadReceipt(fileBuffer: ArrayBuffer, claimedMime: string
   const dir = path.join(process.cwd(), "uploads", "receipts");
   await mkdir(dir, { recursive: true });
   await writeFile(path.join(dir, path.basename(uniqueName)), buf);
-  return { storedUrl: `local://${uniqueName}`, mime: claimedMime };
+  return { storedUrl: `local://${uniqueName}`, mime: claimedMime, size: buf.length };
 }
 
 export async function fetchReceiptBuffer(storedUrl: string): Promise<{ buffer: ArrayBuffer; mime: string }> {

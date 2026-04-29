@@ -39,7 +39,7 @@ import { AppLoadingOverlay } from "@/components/shared/AppLoadingOverlay";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const PAGE_SIZE = 25;
+const PAGE_SIZE = 20;
 const EXPORT_WARN_THRESHOLD = 5_000;
 const PREVIEW_HEADERS = ["اسم العميل", "الجوال", "العنوان", "الدولة", "العملة", "طريقة الدفع", "المنتج", "الكمية", "السعر"];
 
@@ -639,13 +639,13 @@ function ImportDialog({
 function BulkStatusDialog({
   open,
   onClose,
-  selectedIds,
-  onDone,
+  count,
+  onConfirm,
 }: {
   open: boolean;
   onClose: () => void;
-  selectedIds: string[];
-  onDone: () => void;
+  count: number;
+  onConfirm: (statusId: string) => Promise<void>;
 }) {
   const [statusId, setStatusId] = useState("");
   const [loading, setLoading] = useState(false);
@@ -657,25 +657,14 @@ function BulkStatusDialog({
   });
   const statuses = statusesData?.data ?? [];
 
-  const handleClose = () => {
-    setStatusId("");
-    onClose();
-  };
+  const handleClose = () => { setStatusId(""); onClose(); };
 
   const handleSubmit = async () => {
     if (!statusId) return;
     setLoading(true);
     try {
-      const res = await fetch("/api/orders", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "status", ids: selectedIds, statusId }),
-      });
-      const json = await res.json();
-      if (!res.ok) { toast.error(json.error ?? "فشل التحديث"); return; }
-      toast.success(`تم تحديث ${json.data.affected} طلب`);
+      await onConfirm(statusId);
       setStatusId("");
-      onDone();
     } finally {
       setLoading(false);
     }
@@ -685,7 +674,7 @@ function BulkStatusDialog({
     <Dialog open={open} onOpenChange={(o) => !o && handleClose()}>
       <DialogContent dir="rtl" className="max-w-sm">
         <DialogHeader>
-          <DialogTitle>تغيير حالة {selectedIds.length} طلب</DialogTitle>
+          <DialogTitle>تغيير حالة {count} طلب</DialogTitle>
         </DialogHeader>
         <div className="space-y-2">
           <Label>الحالة الجديدة</Label>
@@ -731,16 +720,42 @@ function OrdersPageInner({ setImportOpen }: { setImportOpen: (open: boolean) => 
     if (statusesError) toast.error("فشل تحميل قائمة الحالات");
   }, [statusesError]);
 
+  // ── Users lookup (for employee filter — managers/admins only) ──
+  const canFilterByEmployee = role === "ADMIN" || role === "GENERAL_MANAGER" || role === "SALES_MANAGER";
+  const { data: usersData, isLoading: usersLoading } = useQuery<{ id: string; name: string; role: string }[]>({
+    queryKey: ["lookup-users-filter", role, session?.user?.teamId],
+    queryFn: async () => {
+      const params = new URLSearchParams();
+      params.append("role", "SALES");
+      params.append("role", "SUPPORT");
+      if (role === "SALES_MANAGER" && session?.user?.teamId) {
+        params.set("teamId", session.user.teamId);
+      }
+      const res = await fetch(`/api/lookup/users?${params}`);
+      const json = await res.json();
+      return json.data ?? [];
+    },
+    enabled: canFilterByEmployee,
+    staleTime: 60_000,
+  });
+  const filterableUsers = usersData ?? [];
+
   // ── URL state ──
   const page = parseInt(searchParams.get("page") ?? "1");
   const searchQ = searchParams.get("search") ?? "";
   const statusParams = searchParams.getAll("status");
   const dateFrom = searchParams.get("dateFrom") ?? "";
   const dateTo = searchParams.get("dateTo") ?? "";
+  const createdByIdParam = searchParams.get("createdById") ?? "";
 
   // ── Local state ──
   const [searchInput, setSearchInput] = useState(searchQ);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  // Bulk selection scope
+  const [selectionScope, setSelectionScope] = useState<"page" | "all" | "limited">("page");
+  const [selectionLimit, setSelectionLimit] = useState(0);
+  const [scopeDialogOpen, setScopeDialogOpen] = useState(false);
+  const [limitInput, setLimitInput] = useState("");
   const [filterOpen, setFilterOpen] = useState(false);
   const [dateFromOpen, setDateFromOpen] = useState(false);
   const [dateToOpen, setDateToOpen] = useState(false);
@@ -766,7 +781,8 @@ function OrdersPageInner({ setImportOpen }: { setImportOpen: (open: boolean) => 
     const params = new URLSearchParams(searchParams.toString());
     if (value) params.set(key, value);
     else params.delete(key);
-    params.set("page", "1");
+    // Only reset to page 1 when changing a filter, not when navigating pages
+    if (key !== "page") params.set("page", "1");
     router.replace(`${pathname}?${params.toString()}`);
   }, [searchParams, pathname, router]);
 
@@ -792,24 +808,53 @@ function OrdersPageInner({ setImportOpen }: { setImportOpen: (open: boolean) => 
 
   const isSearching = searchInput !== searchQ || (isFetching && searchQ.length > 0);
 
-  // ── Select all ──
+  // ── Selection ──
   const allIds = data?.data.map((o) => o.id) ?? [];
   const allSelected = allIds.length > 0 && allIds.every((id) => selected.has(id));
 
+  const effectiveSelectionCount =
+    selectionScope === "all" ? (data?.total ?? 0) :
+    selectionScope === "limited" ? selectionLimit :
+    selected.size;
+
+  const clearSelection = () => {
+    setSelected(new Set());
+    setSelectionScope("page");
+    setSelectionLimit(0);
+  };
+
   const toggleAll = () => {
     if (allSelected) {
+      // Deselect: clear current page + reset scope
       setSelected((prev) => { const n = new Set(prev); allIds.forEach((id) => n.delete(id)); return n; });
-    } else {
-      setSelected((prev) => { const n = new Set(prev); allIds.forEach((id) => n.add(id)); return n; });
+      setSelectionScope("page");
+      return;
+    }
+    // Select all current page items
+    setSelected((prev) => { const n = new Set(prev); allIds.forEach((id) => n.add(id)); return n; });
+    // If more pages exist, offer scope expansion
+    if ((data?.totalPages ?? 1) > 1) {
+      setScopeDialogOpen(true);
     }
   };
 
   const toggleOne = (id: string) => {
+    // Reset scope when user manually selects/deselects individual rows
+    if (selectionScope !== "page") setSelectionScope("page");
     setSelected((prev) => {
       const n = new Set(prev);
       n.has(id) ? n.delete(id) : n.add(id);
       return n;
     });
+  };
+
+  // Build the PATCH body based on selection scope
+  const buildBulkPayload = (action: "status" | "delete", statusId?: string) => {
+    const filters = buildFilters();
+    const base = { action, ...(statusId && { statusId }) };
+    if (selectionScope === "all") return { ...base, scope: "all" as const, filters };
+    if (selectionScope === "limited") return { ...base, scope: "limited" as const, limit: selectionLimit, filters };
+    return { ...base, scope: "ids" as const, ids: Array.from(selected) };
   };
 
   // ── Helpers ──
@@ -897,19 +942,36 @@ function OrdersPageInner({ setImportOpen }: { setImportOpen: (open: boolean) => 
     }
   };
 
+  // ── Bulk status confirm ──
+  const handleBulkStatusConfirm = async (statusId: string) => {
+    const payload = buildBulkPayload("status", statusId);
+    const res = await fetch("/api/orders", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const json = await res.json();
+    if (!res.ok) { toast.error(json.error ?? "فشل التحديث"); return; }
+    toast.success(`تم تحديث ${json.data.affected} طلب`);
+    clearSelection();
+    setBulkStatusOpen(false);
+    queryClient.invalidateQueries({ queryKey: ["orders"] });
+  };
+
   // ── Bulk delete ──
   const handleBulkDelete = async () => {
     setBulkDeleteLoading(true);
     try {
+      const payload = buildBulkPayload("delete");
       const res = await fetch("/api/orders", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "delete", ids: Array.from(selected) }),
+        body: JSON.stringify(payload),
       });
       const json = await res.json();
       if (!res.ok) { toast.error(json.error ?? "فشل الحذف"); return; }
       toast.success(`تم حذف ${json.data.affected} طلب`);
-      setSelected(new Set());
+      clearSelection();
       setBulkDeleteConfirm(false);
       queryClient.invalidateQueries({ queryKey: ["orders"] });
     } finally {
@@ -917,13 +979,14 @@ function OrdersPageInner({ setImportOpen }: { setImportOpen: (open: boolean) => 
     }
   };
 
-  const hasActiveFilters = statusParams.length > 0 || dateFrom || dateTo;
+  const hasActiveFilters = statusParams.length > 0 || dateFrom || dateTo || !!createdByIdParam;
 
   const clearFilters = () => {
     const params = new URLSearchParams(searchParams.toString());
     params.delete("status");
     params.delete("dateFrom");
     params.delete("dateTo");
+    params.delete("createdById");
     params.set("page", "1");
     router.replace(`${pathname}?${params.toString()}`);
   };
@@ -1056,6 +1119,26 @@ function OrdersPageInner({ setImportOpen }: { setImportOpen: (open: boolean) => 
               </Popover>
             </div>
 
+            {/* Employee filter — managers/admins only */}
+            {canFilterByEmployee && (
+              <div className="space-y-2">
+                <Label className="text-sm font-medium">تصفية حسب الموظف</Label>
+                {usersLoading ? (
+                  <Skeleton className="h-9 w-full" />
+                ) : (
+                  <SearchableSelect
+                    options={[
+                      { value: "", label: "كل الموظفين" },
+                      ...filterableUsers.map((u) => ({ value: u.id, label: u.name })),
+                    ]}
+                    value={createdByIdParam}
+                    onChange={(v) => updateParam("createdById", v || null)}
+                    placeholder="كل الموظفين"
+                  />
+                )}
+              </div>
+            )}
+
             {hasActiveFilters && (
               <Button variant="ghost" size="sm" className="w-full" onClick={clearFilters}>
                 <X className="h-3 w-3 ml-1" />
@@ -1067,10 +1150,14 @@ function OrdersPageInner({ setImportOpen }: { setImportOpen: (open: boolean) => 
       </div>
 
       {/* Bulk Action Bar */}
-      {selected.size > 0 && (
+      {(selected.size > 0 || selectionScope !== "page") && (
         <div className="flex items-center gap-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
           <span className="text-sm font-medium text-blue-800">
-            تم تحديد {selected.size} طلب
+            {selectionScope === "all"
+              ? `تم تحديد جميع النتائج (${(data?.total ?? 0).toLocaleString("ar")} طلب)`
+              : selectionScope === "limited"
+              ? `تم تحديد أول ${selectionLimit.toLocaleString("ar")} طلب من جميع النتائج`
+              : `تم تحديد ${selected.size} طلب`}
           </span>
           <div className="flex items-center gap-2 mr-auto">
             {(role === "ADMIN" || role === "GENERAL_MANAGER" || role === "SALES_MANAGER" || role === "SALES") && (
@@ -1123,11 +1210,7 @@ function OrdersPageInner({ setImportOpen }: { setImportOpen: (open: boolean) => 
                 حذف المحدد
               </Button>
             )}
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setSelected(new Set())}
-            >
+            <Button variant="ghost" size="sm" onClick={clearSelection}>
               إلغاء التحديد
             </Button>
           </div>
@@ -1219,10 +1302,10 @@ function OrdersPageInner({ setImportOpen }: { setImportOpen: (open: boolean) => 
       </div>
 
       {/* Pagination */}
-      {data && data.totalPages > 1 && (
+      {data && data.total > 0 && (
         <div className="flex items-center justify-between text-sm text-muted-foreground">
           <span>
-            {data.total} طلب — صفحة {data.page} من {data.totalPages}
+            صفحة {data.page} من {data.totalPages} — {data.total.toLocaleString("ar")} طلب
           </span>
           <div className="flex items-center gap-2">
             <Button
@@ -1232,30 +1315,91 @@ function OrdersPageInner({ setImportOpen }: { setImportOpen: (open: boolean) => 
               onClick={() => updateParam("page", String(page - 1))}
             >
               <ChevronRight className="h-4 w-4" />
+              <span className="hidden sm:inline mr-1">السابق</span>
             </Button>
-            <span>{page}</span>
+            <span className="px-1 font-medium">{page}</span>
             <Button
               variant="outline"
               size="sm"
               disabled={page >= (data?.totalPages ?? 1)}
               onClick={() => updateParam("page", String(page + 1))}
             >
+              <span className="hidden sm:inline ml-1">التالي</span>
               <ChevronLeft className="h-4 w-4" />
             </Button>
           </div>
         </div>
       )}
 
+      {/* Selection Scope Dialog */}
+      <Dialog open={scopeDialogOpen} onOpenChange={setScopeDialogOpen}>
+        <DialogContent dir="rtl" className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>نطاق التحديد</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            تم تحديد {allIds.length} طلب في هذه الصفحة. يوجد{" "}
+            <span className="font-medium text-foreground">{(data?.total ?? 0).toLocaleString("ar")}</span>{" "}
+            طلب إجمالاً يطابق الفلاتر الحالية. كيف تريد التحديد؟
+          </p>
+          <div className="space-y-2">
+            <Button
+              variant="outline"
+              className="w-full justify-start"
+              onClick={() => { setSelectionScope("page"); setScopeDialogOpen(false); }}
+            >
+              هذه الصفحة فقط ({allIds.length} طلب)
+            </Button>
+            <Button
+              variant="outline"
+              className="w-full justify-start"
+              onClick={() => { setSelectionScope("all"); setScopeDialogOpen(false); }}
+            >
+              جميع النتائج المطابقة ({(data?.total ?? 0).toLocaleString("ar")} طلب)
+            </Button>
+            <div className="space-y-2 pt-1">
+              <p className="text-sm font-medium">تحديد عدد معين:</p>
+              <div className="flex gap-2">
+                <Input
+                  type="number"
+                  min={1}
+                  max={data?.total ?? 9999}
+                  placeholder="أدخل عدداً"
+                  value={limitInput}
+                  onChange={(e) => setLimitInput(e.target.value)}
+                  className="flex-1"
+                  dir="ltr"
+                />
+                <Button
+                  variant="outline"
+                  disabled={!limitInput || parseInt(limitInput) < 1}
+                  onClick={() => {
+                    const n = parseInt(limitInput);
+                    if (n > 0) {
+                      setSelectionScope("limited");
+                      setSelectionLimit(n);
+                      setScopeDialogOpen(false);
+                      setLimitInput("");
+                    }
+                  }}
+                >
+                  تأكيد
+                </Button>
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setScopeDialogOpen(false)}>إلغاء</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Bulk Status Dialog */}
       <BulkStatusDialog
         open={bulkStatusOpen}
         onClose={() => setBulkStatusOpen(false)}
-        selectedIds={Array.from(selected)}
-        onDone={() => {
-          setBulkStatusOpen(false);
-          setSelected(new Set());
-          queryClient.invalidateQueries({ queryKey: ["orders"] });
-        }}
+        count={effectiveSelectionCount}
+        onConfirm={handleBulkStatusConfirm}
       />
 
       {/* Bulk Delete Confirm */}
@@ -1263,7 +1407,13 @@ function OrdersPageInner({ setImportOpen }: { setImportOpen: (open: boolean) => 
         open={bulkDeleteConfirm}
         onOpenChange={setBulkDeleteConfirm}
         title="حذف الطلبات المحددة"
-        description={`هل أنت متأكد من حذف ${selected.size} طلب؟ لا يمكن التراجع عن هذا الإجراء.`}
+        description={
+          selectionScope === "all"
+            ? `هل أنت متأكد من حذف جميع النتائج المطابقة (${(data?.total ?? 0).toLocaleString("ar")} طلب)؟ لا يمكن التراجع عن هذا الإجراء.`
+            : selectionScope === "limited"
+            ? `هل أنت متأكد من حذف أول ${selectionLimit.toLocaleString("ar")} طلب من النتائج المطابقة؟`
+            : `هل أنت متأكد من حذف ${selected.size} طلب؟ لا يمكن التراجع عن هذا الإجراء.`
+        }
         confirmLabel="حذف"
         cancelLabel="إلغاء"
         onConfirm={handleBulkDelete}

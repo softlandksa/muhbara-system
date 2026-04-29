@@ -14,6 +14,10 @@ const fullOrderInclude = {
   createdBy: { select: { id: true, name: true, email: true, role: true } },
   team: true,
   items: { include: { product: true } },
+  receipts: {
+    orderBy: { createdAt: "asc" as const },
+    include: { uploadedBy: { select: { id: true, name: true } } },
+  },
   shippingInfo: {
     include: {
       shippingCompany: true,
@@ -129,18 +133,27 @@ export async function DELETE(
   const { id } = await ctx.params;
   const order = await prisma.order.findFirst({
     where: { id, deletedAt: null },
-    select: { id: true, paymentReceiptUrl: true },
+    select: {
+      id: true,
+      paymentReceiptUrl: true,
+      receipts: { select: { url: true } },
+    },
   });
   if (!order) return NextResponse.json({ error: "الطلب غير موجود" }, { status: 404 });
 
   await prisma.order.update({ where: { id }, data: { deletedAt: new Date() } });
 
-  // Fire-and-forget: clean up blob receipt so storage doesn't accumulate orphans.
-  if (order.paymentReceiptUrl && !order.paymentReceiptUrl.startsWith("local://")) {
-    deleteFile(order.paymentReceiptUrl).catch((e) =>
+  // Fire-and-forget: clean up all receipt blobs so storage doesn't accumulate orphans.
+  const blobUrls = [
+    ...(order.receipts?.map((r) => r.url) ?? []),
+    order.paymentReceiptUrl,
+  ].filter((url): url is string => url != null && !url.startsWith("local://"));
+
+  blobUrls.forEach((url) =>
+    deleteFile(url).catch((e) =>
       console.error("[DELETE /api/orders/:id] blob cleanup failed:", e)
-    );
-  }
+    )
+  );
 
   return NextResponse.json({ data: { success: true } });
 }

@@ -8,6 +8,12 @@ import { createNotificationsForRole } from "@/lib/notifications";
 import { logActivity } from "@/lib/activity-log";
 import { deleteFile } from "@/lib/storage";
 
+const receiptSchema = z.object({
+  url: z.string().url("رابط الإيصال غير صحيح"),
+  mimeType: z.string().min(1),
+  size: z.number().int().min(0),
+});
+
 const createOrderSchema = z.object({
   orderDate: z.string().min(1, "التاريخ مطلوب"),
   customerName: z.string().min(1, "اسم العميل مطلوب"),
@@ -19,6 +25,9 @@ const createOrderSchema = z.object({
   notes: z.string().optional(),
   isRepeatCustomer: z.boolean().optional(),
   repeatCustomerNote: z.string().optional(),
+  // Multi-receipt (new): up to 3 files, each already uploaded to Blob
+  receipts: z.array(receiptSchema).max(3, "يمكن رفع 3 إيصالات كحد أقصى").optional(),
+  // Legacy single-receipt fields (kept for backward compat)
   paymentReceiptUrl: z.string().url().optional(),
   paymentReceiptMime: z.string().optional(),
   items: z
@@ -142,7 +151,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const { orderDate, customerName, phone, address, countryId, currencyId, paymentMethodId, notes, isRepeatCustomer, repeatCustomerNote, paymentReceiptUrl, paymentReceiptMime, items } = parsed.data;
+  const { orderDate, customerName, phone, address, countryId, currencyId, paymentMethodId, notes, isRepeatCustomer, repeatCustomerNote, receipts, paymentReceiptUrl, paymentReceiptMime, items } = parsed.data;
 
   // Parallel: validate country + look up initial status — independent queries.
   const [country, initialStatus] = await Promise.all([
@@ -210,7 +219,27 @@ export async function POST(request: NextRequest) {
         },
       });
 
-      if (paymentReceiptUrl) {
+      // Create PaymentReceipt records for the multi-receipt system
+      if (receipts && receipts.length > 0) {
+        await tx.paymentReceipt.createMany({
+          data: receipts.map((r) => ({
+            orderId: created.id,
+            url: r.url,
+            mimeType: r.mimeType,
+            size: r.size,
+            uploadedById: userId,
+          })),
+        });
+        await tx.orderAuditLog.create({
+          data: {
+            orderId: created.id,
+            action: "RECEIPT_UPLOADED",
+            changedById: userId,
+            changedAt: new Date(),
+          },
+        });
+      } else if (paymentReceiptUrl) {
+        // Legacy single-receipt path
         await tx.orderAuditLog.create({
           data: {
             orderId: created.id,
@@ -247,42 +276,124 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ data: order }, { status: 201 });
   } catch (err) {
     console.error("[POST /api/orders] transaction error:", err);
-    // If a receipt was uploaded to Blob before the transaction failed, delete it
-    // so we don't leave orphaned files in storage.
-    if (paymentReceiptUrl && !paymentReceiptUrl.startsWith("local://")) {
-      deleteFile(paymentReceiptUrl).catch((e) =>
+    // Clean up any blobs uploaded before the transaction failed to avoid orphans.
+    const urlsToClean = [
+      ...(receipts?.map((r) => r.url) ?? []),
+      paymentReceiptUrl,
+    ].filter((url): url is string => url != null && !url.startsWith("local://"));
+    urlsToClean.forEach((url) =>
+      deleteFile(url).catch((e) =>
         console.error("[POST /api/orders] orphan blob cleanup failed:", e)
-      );
-    }
+      )
+    );
     const message = err instanceof Error ? err.message : "حدث خطأ غير متوقع";
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
 
+type BulkFilters = {
+  search?: string;
+  status?: string[];
+  dateFrom?: string;
+  dateTo?: string;
+  createdById?: string;
+  teamId?: string;
+};
+
+function buildBulkWhere(
+  filters: BulkFilters,
+  userRole: string,
+  userId: string,
+  userTeamId: string | null
+) {
+  const roleFilter: Record<string, unknown> = { deletedAt: null };
+  if (userRole === "SALES_MANAGER" && userTeamId) roleFilter.teamId = userTeamId;
+  if (userRole === "SALES" || userRole === "SUPPORT") roleFilter.createdById = userId;
+
+  const userFilter: Record<string, unknown> = {};
+  if (filters.status && filters.status.length > 0) userFilter.statusId = { in: filters.status };
+  if (filters.createdById && (userRole === "ADMIN" || userRole === "GENERAL_MANAGER" || userRole === "SALES_MANAGER")) {
+    userFilter.createdById = filters.createdById;
+  }
+  if (filters.teamId && (userRole === "ADMIN" || userRole === "GENERAL_MANAGER")) {
+    roleFilter.teamId = filters.teamId;
+  }
+  if (filters.dateFrom) {
+    userFilter.orderDate = { ...(userFilter.orderDate as object ?? {}), gte: new Date(filters.dateFrom) };
+  }
+  if (filters.dateTo) {
+    userFilter.orderDate = { ...(userFilter.orderDate as object ?? {}), lte: new Date(filters.dateTo + "T23:59:59") };
+  }
+  const searchFilter = filters.search
+    ? {
+        OR: [
+          { orderNumber: { contains: filters.search, mode: "insensitive" as const } },
+          { customerName: { contains: filters.search, mode: "insensitive" as const } },
+          { phone: { contains: filters.search } },
+        ],
+      }
+    : {};
+  return { AND: [roleFilter, userFilter, searchFilter] };
+}
+
 export async function PATCH(request: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session?.user) return NextResponse.json({ error: "غير مصرح" }, { status: 401 });
-  const { role } = session.user;
+  const { role, id: userId, teamId } = session.user;
 
-  const body = await request.json();
-  const { action, ids, statusId } = body as { action: "status" | "delete"; ids: string[]; statusId?: string };
+  let body: {
+    action: "status" | "delete";
+    scope?: "ids" | "all" | "limited";
+    ids?: string[];
+    limit?: number;
+    filters?: BulkFilters;
+    statusId?: string;
+  };
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: "طلب غير صحيح" }, { status: 400 });
+  }
 
-  if (!ids || ids.length === 0) return NextResponse.json({ error: "لم يتم تحديد طلبات" }, { status: 400 });
+  const { action, scope = "ids", ids, limit, filters, statusId } = body;
+  if (!action) return NextResponse.json({ error: "الإجراء مطلوب" }, { status: 400 });
+
+  // Resolve the target order IDs depending on scope
+  let targetIds: string[];
+
+  if (scope === "all" || scope === "limited") {
+    const where = buildBulkWhere(filters ?? {}, role, userId, teamId ?? null);
+    const orders = await prisma.order.findMany({
+      where,
+      select: { id: true },
+      ...(scope === "limited" && limit && limit > 0 ? { take: limit } : {}),
+    });
+    targetIds = orders.map((o) => o.id);
+  } else {
+    if (!ids || ids.length === 0) return NextResponse.json({ error: "لم يتم تحديد طلبات" }, { status: 400 });
+    targetIds = ids;
+  }
+
+  if (targetIds.length === 0) {
+    return NextResponse.json({ data: { affected: 0 } });
+  }
 
   if (action === "delete") {
     if (role !== "ADMIN") return NextResponse.json({ error: "ممنوع" }, { status: 403 });
-    await prisma.order.updateMany({ where: { id: { in: ids }, deletedAt: null }, data: { deletedAt: new Date() } });
-    return NextResponse.json({ data: { affected: ids.length } });
+    await prisma.order.updateMany({
+      where: { id: { in: targetIds }, deletedAt: null },
+      data: { deletedAt: new Date() },
+    });
+    return NextResponse.json({ data: { affected: targetIds.length } });
   }
 
   if (action === "status") {
     if (role !== "ADMIN" && role !== "SALES_MANAGER") return NextResponse.json({ error: "ممنوع" }, { status: 403 });
     if (!statusId) return NextResponse.json({ error: "الحالة مطلوبة" }, { status: 400 });
-    // Verify the statusId exists
     const status = await prisma.shippingStatusPrimary.findUnique({ where: { id: statusId } });
     if (!status) return NextResponse.json({ error: "الحالة غير موجودة" }, { status: 400 });
-    await prisma.order.updateMany({ where: { id: { in: ids }, deletedAt: null }, data: { statusId } });
-    return NextResponse.json({ data: { affected: ids.length } });
+    await prisma.order.updateMany({ where: { id: { in: targetIds }, deletedAt: null }, data: { statusId } });
+    return NextResponse.json({ data: { affected: targetIds.length } });
   }
 
   return NextResponse.json({ error: "إجراء غير معروف" }, { status: 400 });

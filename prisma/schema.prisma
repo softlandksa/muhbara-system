@@ -26,6 +26,7 @@ model User {
   notifications       Notification[]
   orders              Order[]          @relation("OrderCreator")
   auditLogs           OrderAuditLog[]
+  paymentReceipts     PaymentReceipt[]
   shippingActions     ShippingInfo[]
   managedTeams        Team[]           @relation("TeamManager")
   team                Team?            @relation("TeamMembers", fields: [teamId], references: [id])
@@ -67,6 +68,7 @@ model Order {
   paymentReceiptUploadedAt DateTime?
   followUpNotes      FollowUpNote[]
   notifications      Notification[]
+  receipts           PaymentReceipt[]
   country            Country               @relation(fields: [countryId], references: [id])
   createdBy          User                  @relation("OrderCreator", fields: [createdById], references: [id])
   currency           Currency              @relation(fields: [currencyId], references: [id])
@@ -399,4 +401,19 @@ enum NotificationType {
   NEW_REPORT
   COMMISSION
   SYSTEM
+}
+
+model PaymentReceipt {
+  id           String   @id @default(cuid())
+  orderId      String
+  url          String
+  mimeType     String
+  size         Int
+  uploadedById String
+  createdAt    DateTime @default(now())
+  order        Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  uploadedBy   User     @relation(fields: [uploadedById], references: [id])
+
+  @@index([orderId])
+  @@index([uploadedById])
 }

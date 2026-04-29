@@ -220,107 +220,148 @@ function DuplicateAlert({
   );
 }
 
-// ─── Receipt Upload Component ─────────────────────────────────────────────────
+// ─── Multi-Receipt Upload Component ──────────────────────────────────────────
 
 const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp", "application/pdf"];
 const MAX_SIZE = 10 * 1024 * 1024;
+const MAX_RECEIPTS = 3;
 
-function ReceiptUpload({
-  file,
-  previewUrl,
-  error,
-  onFileChange,
-  onClear,
+type ReceiptEntry = { id: string; file: File; previewUrl: string | null };
+
+function validateReceiptFile(f: File): string | null {
+  if (f.size > MAX_SIZE) return "حجم الملف يتجاوز الحد المسموح به (10 ميغابايت)";
+  if (!ALLOWED_TYPES.includes(f.type)) return "نوع الملف غير مدعوم. الأنواع المقبولة: JPG، PNG، WebP، PDF";
+  return null;
+}
+
+function ReceiptFileCard({
+  entry,
+  index,
+  onRemove,
 }: {
-  file: File | null;
-  previewUrl: string | null;
-  error: string | null;
-  onFileChange: (f: File) => void;
-  onClear: () => void;
+  entry: ReceiptEntry;
+  index: number;
+  onRemove: (id: string) => void;
+}) {
+  const isPdf = entry.file.type === "application/pdf";
+  return (
+    <div className="rounded-lg border bg-muted/30 p-3 flex items-start gap-3">
+      <div className="flex-shrink-0 w-10 h-10 rounded-md overflow-hidden border flex items-center justify-center bg-muted">
+        {isPdf ? (
+          <FileText className="h-5 w-5 text-red-500" />
+        ) : entry.previewUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={entry.previewUrl} alt="" className="w-full h-full object-cover" />
+        ) : (
+          <ImageIcon className="h-5 w-5 text-blue-400" />
+        )}
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-medium truncate">{entry.file.name}</p>
+        <p className="text-xs text-muted-foreground">
+          إيصال {index + 1} — {(entry.file.size / 1024).toFixed(0)} كيلوبايت
+        </p>
+      </div>
+      <button
+        type="button"
+        onClick={() => onRemove(entry.id)}
+        className="flex-shrink-0 rounded-full p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors"
+        aria-label="إزالة الإيصال"
+      >
+        <X className="h-4 w-4" />
+      </button>
+    </div>
+  );
+}
+
+function MultiReceiptUpload({
+  entries,
+  globalError,
+  onAdd,
+  onRemove,
+}: {
+  entries: ReceiptEntry[];
+  globalError: string | null;
+  onAdd: (f: File) => void;
+  onRemove: (id: string) => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
+  const canAddMore = entries.length < MAX_RECEIPTS;
 
-  const validate = (f: File): string | null => {
-    if (f.size > MAX_SIZE) return "حجم الملف يتجاوز الحد المسموح به (10 ميغابايت)";
-    if (!ALLOWED_TYPES.includes(f.type)) return "نوع الملف غير مدعوم. الأنواع المقبولة: JPG، PNG، WebP، PDF";
-    return null;
-  };
-
-  const handle = (f: File) => {
-    const err = validate(f);
-    if (!err) onFileChange(f);
-    else onFileChange(Object.assign(f, { _validationError: err }) as File);
-  };
+  const handleFile = (f: File) => onAdd(f);
 
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setDragging(false);
-    const f = e.dataTransfer.files[0];
-    if (f) handle(f);
+    // Process dropped files up to remaining slots
+    const files = Array.from(e.dataTransfer.files);
+    const remaining = MAX_RECEIPTS - entries.length;
+    files.slice(0, remaining).forEach((f) => handleFile(f));
+    if (files.length > remaining && remaining <= 0) {
+      onAdd(files[0]); // triggers the parent's "max reached" error
+    }
   };
 
   const onInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0];
-    if (f) handle(f);
+    const files = Array.from(e.target.files ?? []);
+    const remaining = MAX_RECEIPTS - entries.length;
+    // Process files up to remaining capacity; excess triggers parent error
+    files.slice(0, remaining).forEach((f) => handleFile(f));
+    if (files.length > remaining) {
+      // Trigger error by attempting one more add
+      if (files[remaining]) handleFile(files[remaining]);
+    }
     e.target.value = "";
   };
 
-  const isPdf = file?.type === "application/pdf";
-
   return (
-    <div className="space-y-2">
-      {!file ? (
+    <div className="space-y-3">
+      {/* Existing files */}
+      {entries.map((entry, index) => (
+        <ReceiptFileCard key={entry.id} entry={entry} index={index} onRemove={onRemove} />
+      ))}
+
+      {/* Drop zone — only when more can be added */}
+      {canAddMore && (
         <div
           onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
           onDragLeave={() => setDragging(false)}
           onDrop={onDrop}
           onClick={() => inputRef.current?.click()}
           className={cn(
-            "flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed px-6 py-8 cursor-pointer transition-colors text-sm",
+            "flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed px-6 py-6 cursor-pointer transition-colors text-sm",
             dragging ? "border-primary bg-primary/5" : "border-muted-foreground/30 hover:border-primary/50 hover:bg-muted/40"
           )}
         >
-          <Upload className="h-8 w-8 text-muted-foreground/60" />
-          <p className="font-medium text-muted-foreground">اسحب الملف هنا أو اضغط للاختيار</p>
-          <p className="text-xs text-muted-foreground/60">JPG، PNG، WebP، PDF — حتى 10 ميغابايت</p>
-        </div>
-      ) : (
-        <div className="rounded-lg border bg-muted/30 p-3 flex items-start gap-3">
-          {isPdf ? (
-            <div className="flex-shrink-0 w-14 h-14 rounded-md bg-red-50 border border-red-200 flex items-center justify-center">
-              <FileText className="h-7 w-7 text-red-500" />
-            </div>
-          ) : previewUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={previewUrl} alt="معاينة الإيصال" className="w-14 h-14 object-cover rounded-md border" />
+          <Upload className="h-6 w-6 text-muted-foreground/60" />
+          {entries.length === 0 ? (
+            <>
+              <p className="font-medium text-muted-foreground">اسحب الملف هنا أو اضغط للاختيار</p>
+              <p className="text-xs text-muted-foreground/60">JPG، PNG، WebP، PDF — حتى 10 ميغابايت — يمكن رفع 3 إيصالات</p>
+            </>
           ) : (
-            <div className="flex-shrink-0 w-14 h-14 rounded-md bg-blue-50 border border-blue-200 flex items-center justify-center">
-              <ImageIcon className="h-7 w-7 text-blue-400" />
-            </div>
+            <p className="font-medium text-muted-foreground">
+              إضافة إيصال آخر ({entries.length}/{MAX_RECEIPTS})
+            </p>
           )}
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium truncate">{file.name}</p>
-            <p className="text-xs text-muted-foreground">{(file.size / 1024).toFixed(0)} كيلوبايت</p>
-          </div>
-          <button
-            type="button"
-            onClick={(e) => { e.stopPropagation(); onClear(); }}
-            className="flex-shrink-0 rounded-full p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors"
-            aria-label="إزالة الملف"
-          >
-            <X className="h-4 w-4" />
-          </button>
         </div>
       )}
 
-      {error && <p className="text-xs text-destructive">{error}</p>}
+      {entries.length >= MAX_RECEIPTS && (
+        <p className="text-xs text-muted-foreground text-center">
+          تم الوصول للحد الأقصى ({MAX_RECEIPTS} إيصالات)
+        </p>
+      )}
+
+      {globalError && <p className="text-xs text-destructive">{globalError}</p>}
 
       <input
         ref={inputRef}
         type="file"
         className="hidden"
         accept="image/jpeg,image/png,image/webp,application/pdf"
+        multiple
         onChange={onInputChange}
       />
     </div>
@@ -346,34 +387,31 @@ export default function NewOrderPage() {
 
   const role = session?.user?.role;
 
-  // ── Receipt upload state ──
-  const [receiptFile, setReceiptFile] = useState<File | null>(null);
-  const [receiptPreviewUrl, setReceiptPreviewUrl] = useState<string | null>(null);
+  // ── Multi-receipt upload state ──
+  const [receiptEntries, setReceiptEntries] = useState<ReceiptEntry[]>([]);
   const [receiptError, setReceiptError] = useState<string | null>(null);
 
-  const handleReceiptChange = (f: File) => {
-    // Check for client-side validation error attached to File object
-    const err = (f as File & { _validationError?: string })._validationError;
-    if (err) {
-      setReceiptError(err);
-      setReceiptFile(null);
-      setReceiptPreviewUrl(null);
+  const handleReceiptAdd = (f: File) => {
+    const err = validateReceiptFile(f);
+    if (err) { setReceiptError(err); return; }
+    if (receiptEntries.length >= MAX_RECEIPTS) {
+      setReceiptError(`يمكن رفع ${MAX_RECEIPTS} إيصالات كحد أقصى`);
       return;
     }
     setReceiptError(null);
-    setReceiptFile(f);
-    if (f.type !== "application/pdf") {
-      const url = URL.createObjectURL(f);
-      setReceiptPreviewUrl(url);
-    } else {
-      setReceiptPreviewUrl(null);
-    }
+    const previewUrl = f.type !== "application/pdf" ? URL.createObjectURL(f) : null;
+    setReceiptEntries((prev) => [
+      ...prev,
+      { id: crypto.randomUUID(), file: f, previewUrl },
+    ]);
   };
 
-  const handleReceiptClear = () => {
-    setReceiptFile(null);
-    if (receiptPreviewUrl) URL.revokeObjectURL(receiptPreviewUrl);
-    setReceiptPreviewUrl(null);
+  const handleReceiptRemove = (id: string) => {
+    setReceiptEntries((prev) => {
+      const entry = prev.find((e) => e.id === id);
+      if (entry?.previewUrl) URL.revokeObjectURL(entry.previewUrl);
+      return prev.filter((e) => e.id !== id);
+    });
     setReceiptError(null);
   };
 
@@ -496,20 +534,27 @@ export default function NewOrderPage() {
   // ── Mutation ──
   const mutation = useMutation({
     mutationFn: async (data: OrderFormData) => {
-      // Step 1: upload receipt if provided
-      let paymentReceiptUrl: string | undefined;
-      let paymentReceiptMime: string | undefined;
-      if (receiptFile) {
+      // Step 1: upload all receipt files sequentially
+      type UploadedReceipt = { url: string; mimeType: string; size: number };
+      const uploadedReceipts: UploadedReceipt[] = [];
+
+      for (const entry of receiptEntries) {
         const fd = new FormData();
-        fd.append("file", receiptFile);
+        fd.append("file", entry.file);
         const uploadRes = await fetch("/api/upload/receipt", { method: "POST", body: fd });
-        const uploadJson: { data?: { storedUrl: string; mime: string }; error?: string } = await uploadRes.json().catch(() => ({}));
-        if (!uploadRes.ok) throw new Error(uploadJson.error ?? "فشل رفع إيصال السداد");
-        paymentReceiptUrl = uploadJson.data?.storedUrl;
-        paymentReceiptMime = uploadJson.data?.mime;
+        const uploadJson: { data?: { storedUrl: string; mime: string; size: number }; error?: string } =
+          await uploadRes.json().catch(() => ({}));
+        if (!uploadRes.ok) {
+          throw new Error(uploadJson.error ?? "فشل رفع إيصال السداد");
+        }
+        uploadedReceipts.push({
+          url: uploadJson.data!.storedUrl,
+          mimeType: uploadJson.data!.mime,
+          size: uploadJson.data!.size,
+        });
       }
 
-      // Step 2: create order
+      // Step 2: create order (receipts array goes to server)
       const res = await fetch("/api/orders", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -518,7 +563,7 @@ export default function NewOrderPage() {
           orderDate: data.orderDate.toISOString(),
           isRepeatCustomer,
           repeatCustomerNote,
-          ...(paymentReceiptUrl && { paymentReceiptUrl, paymentReceiptMime }),
+          ...(uploadedReceipts.length > 0 && { receipts: uploadedReceipts }),
         }),
       });
       let json: { data?: { id: string }; error?: string } = {};
@@ -544,8 +589,8 @@ export default function NewOrderPage() {
   // Block submission when duplicate found but not acknowledged
   const submitBlocked = dupState.isDuplicate && !dupAcknowledged;
 
-  // Permission guard — after ALL hooks
-  if (role && role !== "ADMIN" && role !== "SALES") {
+  // Permission guard — after ALL hooks (SUPPORT can also create orders per API)
+  if (role && role !== "ADMIN" && role !== "SALES" && role !== "SUPPORT") {
     router.replace("/orders");
     return null;
   }
@@ -811,17 +856,21 @@ export default function NewOrderPage() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
               <Upload className="h-4 w-4" />
-              إيصال السداد <span className="text-sm font-normal text-muted-foreground">(اختياري)</span>
+              إيصالات السداد{" "}
+              <span className="text-sm font-normal text-muted-foreground">
+                (اختياري — حتى {MAX_RECEIPTS} إيصالات)
+              </span>
             </CardTitle>
-            <p className="text-sm text-muted-foreground">ارفع صورة أو PDF لإيصال التحويل أو الدفع</p>
+            <p className="text-sm text-muted-foreground">
+              ارفع صورة أو PDF لكل إيصال تحويل أو دفعة
+            </p>
           </CardHeader>
           <CardContent>
-            <ReceiptUpload
-              file={receiptFile}
-              previewUrl={receiptPreviewUrl}
-              error={receiptError}
-              onFileChange={handleReceiptChange}
-              onClear={handleReceiptClear}
+            <MultiReceiptUpload
+              entries={receiptEntries}
+              globalError={receiptError}
+              onAdd={handleReceiptAdd}
+              onRemove={handleReceiptRemove}
             />
           </CardContent>
         </Card>

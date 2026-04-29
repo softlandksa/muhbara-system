@@ -57,6 +57,15 @@ type ShippingStatusItem = {
   id: string; name: string; color: string; sortOrder: number; subs: ShippingStatusSub[];
 };
 
+type PaymentReceiptRecord = {
+  id: string;
+  url: string;
+  mimeType: string;
+  size: number;
+  createdAt: string;
+  uploadedBy: { id: string; name: string };
+};
+
 type OrderDetail = {
   id: string;
   orderNumber: string;
@@ -75,9 +84,12 @@ type OrderDetail = {
   createdBy: { id: string; name: string; email: string; role: string };
   createdAt: string;
   team: { id: string; name: string } | null;
+  // Legacy single receipt (kept for backward compat with old orders)
   paymentReceiptUrl: string | null;
   paymentReceiptMime: string | null;
   paymentReceiptUploadedAt: string | null;
+  // New multi-receipt records
+  receipts: PaymentReceiptRecord[];
   items: {
     id: string;
     quantity: number;
@@ -522,18 +534,39 @@ export default function OrderDetailPage() {
                 <p className="text-muted-foreground">الإجمالي</p>
                 <p className="font-bold text-lg">{order.totalAmount.toFixed(2)} {order.currency.code}</p>
               </div>
-              {order.paymentReceiptUrl && (
+              {/* Receipts — show new multi-receipt records first, then legacy single receipt */}
+              {(order.receipts?.length > 0 || order.paymentReceiptUrl) && (
                 <div className="col-span-2">
-                  <p className="text-muted-foreground flex items-center gap-1 mb-1"><Receipt className="h-3 w-3" /> إيصال السداد</p>
-                  <a
-                    href={`/api/orders/${order.id}/receipt`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1.5 rounded-md border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-sm font-medium text-emerald-700 hover:bg-emerald-100 transition-colors"
-                  >
-                    <Receipt className="h-4 w-4" />
-                    عرض إيصال السداد
-                  </a>
+                  <p className="text-muted-foreground flex items-center gap-1 mb-2">
+                    <Receipt className="h-3 w-3" /> إيصالات السداد
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {/* New PaymentReceipt records */}
+                    {order.receipts?.map((r, i) => (
+                      <a
+                        key={r.id}
+                        href={`/api/orders/${order.id}/receipts/${r.id}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1.5 rounded-md border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-sm font-medium text-emerald-700 hover:bg-emerald-100 transition-colors"
+                      >
+                        <Receipt className="h-4 w-4" />
+                        {order.receipts.length > 1 ? `إيصال ${i + 1}` : "عرض الإيصال"}
+                      </a>
+                    ))}
+                    {/* Legacy single receipt (old orders only) */}
+                    {order.paymentReceiptUrl && (
+                      <a
+                        href={`/api/orders/${order.id}/receipt`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1.5 rounded-md border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-sm font-medium text-emerald-700 hover:bg-emerald-100 transition-colors"
+                      >
+                        <Receipt className="h-4 w-4" />
+                        عرض إيصال السداد
+                      </a>
+                    )}
+                  </div>
                 </div>
               )}
               {order.notes && (

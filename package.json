@@ -8,6 +8,7 @@
     "postinstall": "prisma generate",
     "start": "next start",
     "lint": "eslint",
+    "check:env": "tsx scripts/check-env.ts",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:seed": "tsx prisma/seed.ts",

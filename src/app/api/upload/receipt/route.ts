@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { uploadReceipt, ALLOWED_RECEIPT_MIMES, MAX_RECEIPT_SIZE } from "@/lib/storage";
+import { uploadReceipt, StorageConfigError, ALLOWED_RECEIPT_MIMES, MAX_RECEIPT_SIZE } from "@/lib/storage";
 
 export async function POST(request: NextRequest) {
   const session = await getServerSession(authOptions);
@@ -39,6 +39,11 @@ export async function POST(request: NextRequest) {
     const result = await uploadReceipt(await file.arrayBuffer(), file.type);
     return NextResponse.json({ data: result }, { status: 201 });
   } catch (err) {
+    if (err instanceof StorageConfigError) {
+      // Technical details are for ops/admin only — never expose to employees.
+      console.error("[upload/receipt] storage misconfiguration:", err.technicalMessage);
+      return NextResponse.json({ error: err.userMessage }, { status: 503 });
+    }
     const message = err instanceof Error ? err.message : "فشل رفع الملف";
     return NextResponse.json({ error: message }, { status: 400 });
   }

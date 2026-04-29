@@ -10,6 +10,29 @@ export const ALLOWED_RECEIPT_MIMES = new Set([
   "application/pdf",
 ]);
 
+/**
+ * Thrown when the storage backend is not configured or unavailable.
+ * Always log `technicalMessage` server-side; only surface `userMessage` to employees.
+ */
+export class StorageConfigError extends Error {
+  readonly userMessage: string;
+  readonly technicalMessage: string;
+
+  constructor(technicalMessage: string) {
+    const userMessage =
+      "تعذر رفع إيصال السداد حالياً. يرجى التواصل مع الإدارة أو المحاولة لاحقاً.";
+    super(userMessage);
+    this.name = "StorageConfigError";
+    this.userMessage = userMessage;
+    this.technicalMessage = technicalMessage;
+  }
+}
+
+/** Returns true when Vercel Blob is configured and ready. */
+export function isStorageReady(): boolean {
+  return Boolean(process.env.BLOB_READ_WRITE_TOKEN);
+}
+
 // Magic byte signatures → MIME type
 const MAGIC_PATTERNS: Array<{ bytes: number[]; mime: string }> = [
   { bytes: [0xff, 0xd8, 0xff], mime: "image/jpeg" },
@@ -58,6 +81,15 @@ export async function uploadReceipt(fileBuffer: ArrayBuffer, claimedMime: string
     throw new Error("نوع الملف لا يتطابق مع محتواه الفعلي");
   }
 
+  // Production requires Vercel Blob — Lambda filesystem is ephemeral and read-only.
+  if (process.env.NODE_ENV === "production" && !process.env.BLOB_READ_WRITE_TOKEN) {
+    throw new StorageConfigError(
+      "BLOB_READ_WRITE_TOKEN is not set. " +
+        "Go to Vercel Dashboard → Storage → Blob, create/connect a store, " +
+        "copy BLOB_READ_WRITE_TOKEN into Environment Variables, then redeploy."
+    );
+  }
+
   const uniqueName = `receipts/${randomUUID()}${extFromMime(claimedMime)}`;
 
   if (process.env.BLOB_READ_WRITE_TOKEN) {
@@ -68,13 +100,6 @@ export async function uploadReceipt(fileBuffer: ArrayBuffer, claimedMime: string
       token: process.env.BLOB_READ_WRITE_TOKEN,
     });
     return { storedUrl: blob.url, mime: claimedMime };
-  }
-
-  // Production requires Vercel Blob — local FS is read-only on Vercel Lambda.
-  if (process.env.NODE_ENV === "production") {
-    throw new Error(
-      "متغير BLOB_READ_WRITE_TOKEN غير مكوّن. يرجى إضافته في إعدادات Vercel → Storage → Blob."
-    );
   }
 
   // Local filesystem fallback — development only.

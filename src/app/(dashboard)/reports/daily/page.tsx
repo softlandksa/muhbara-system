@@ -273,6 +273,7 @@ function SalesReportForm({ allReports }: { allReports: DailyReport[] }) {
 
   const existingReport = allReports.find((r) => r.reportDate.startsWith(selectedDate));
 
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     const rep = allReports.find((r) => r.reportDate.startsWith(selectedDate));
     const data = rep?.reportData as Record<string, unknown> | null ?? {};
@@ -287,6 +288,7 @@ function SalesReportForm({ allReports }: { allReports: DailyReport[] }) {
     setTopObjections(String(data.topObjections ?? ""));
     setImprovementSuggestion(String(data.improvementSuggestion ?? ""));
   }, [selectedDate, allReports]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const mutation = useMutation({
     mutationFn: async () => {
@@ -403,6 +405,7 @@ function ManagerReportForm({ allReports }: { allReports: DailyReport[] }) {
 
   const existingReport = allReports.find((r) => r.reportDate.startsWith(selectedDate));
 
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     const rep = allReports.find((r) => r.reportDate.startsWith(selectedDate));
     const data = rep?.reportData as Record<string, unknown> | null ?? {};
@@ -417,6 +420,7 @@ function ManagerReportForm({ allReports }: { allReports: DailyReport[] }) {
     setTopObjections(String(data.topObjections ?? ""));
     setTeamImprovementSuggestion(String(data.teamImprovementSuggestion ?? ""));
   }, [selectedDate, allReports]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const mutation = useMutation({
     mutationFn: async () => {
@@ -528,6 +532,7 @@ function ShippingReportForm({ allReports }: { allReports: DailyReport[] }) {
 
   const existingReport = allReports.find((r) => r.reportDate.startsWith(selectedDate));
 
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     const rep = allReports.find((r) => r.reportDate.startsWith(selectedDate));
     const data = rep?.reportData as Record<string, unknown> | null ?? {};
@@ -540,6 +545,7 @@ function ShippingReportForm({ allReports }: { allReports: DailyReport[] }) {
     setNotes(String(data.notes ?? ""));
     setImprovementSuggestion(String(data.improvementSuggestion ?? ""));
   }, [selectedDate, allReports]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const mutation = useMutation({
     mutationFn: async () => {

@@ -31,6 +31,29 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 
 ## Deploy on Vercel
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+### Required environment variables
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+| Variable | Required | Description |
+|---|---|---|
+| `DATABASE_URL` | ✅ | Pooled Postgres connection string (PgBouncer) |
+| `DIRECT_URL` | ✅ | Direct Postgres connection (used by Prisma migrations) |
+| `NEXTAUTH_SECRET` | ✅ | Random secret — generate with `openssl rand -base64 32` |
+| `NEXTAUTH_URL` | ✅ | Full production URL, e.g. `https://your-app.vercel.app` |
+| `BLOB_READ_WRITE_TOKEN` | ✅ | Vercel Blob token — **required for file uploads in production** |
+
+### Setting up Vercel Blob (file uploads)
+
+Payment receipt uploads use [Vercel Blob](https://vercel.com/docs/storage/vercel-blob) as the storage provider.
+The local filesystem cannot be used on Vercel (Lambda FS is read-only).
+
+1. Open your Vercel project → **Storage** tab → **Create** → **Blob**
+2. Name the store (e.g. `order-receipts`) and click **Create**
+3. Go to **Settings** → **Connect Project** and link it to your deployment
+4. Vercel automatically adds `BLOB_READ_WRITE_TOKEN` to your project's environment variables
+5. Redeploy — uploads will now work
+
+### Local development
+
+In local development, `BLOB_READ_WRITE_TOKEN` is not required.
+When the variable is absent and `NODE_ENV` is not `production`, uploaded files are saved to `./uploads/` instead.
+That directory is git-ignored and must never be deployed.

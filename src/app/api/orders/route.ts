@@ -6,6 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { generateOrderNumber } from "@/lib/order-number";
 import { createNotificationsForRole } from "@/lib/notifications";
 import { logActivity } from "@/lib/activity-log";
+import { deleteFile } from "@/lib/storage";
 
 const createOrderSchema = z.object({
   orderDate: z.string().min(1, "التاريخ مطلوب"),
@@ -246,6 +247,13 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ data: order }, { status: 201 });
   } catch (err) {
     console.error("[POST /api/orders] transaction error:", err);
+    // If a receipt was uploaded to Blob before the transaction failed, delete it
+    // so we don't leave orphaned files in storage.
+    if (paymentReceiptUrl && !paymentReceiptUrl.startsWith("local://")) {
+      deleteFile(paymentReceiptUrl).catch((e) =>
+        console.error("[POST /api/orders] orphan blob cleanup failed:", e)
+      );
+    }
     const message = err instanceof Error ? err.message : "حدث خطأ غير متوقع";
     return NextResponse.json({ error: message }, { status: 500 });
   }

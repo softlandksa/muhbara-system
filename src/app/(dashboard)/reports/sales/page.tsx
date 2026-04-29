@@ -104,12 +104,13 @@ function BarTooltip({ active, payload, label }: {
   );
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+/* eslint-disable @typescript-eslint/no-explicit-any */
 function PieTooltipContent({ active, payload, total }: {
   active?: boolean;
   payload?: readonly Record<string, any>[];
   total: number;
-}) {
+})
+/* eslint-enable @typescript-eslint/no-explicit-any */ {
   if (!active || !payload?.length) return null;
   const item = payload[0];
   const numVal = typeof item.value === "number" ? item.value : 0;

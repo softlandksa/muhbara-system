@@ -218,7 +218,7 @@ export function Sidebar({ collapsed, onClose }: SidebarProps) {
     return "";
   });
 
-  // Auto-expand the group whose child route matches current pathname
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     for (const item of navItems) {
       if (
@@ -232,6 +232,7 @@ export function Sidebar({ collapsed, onClose }: SidebarProps) {
       }
     }
   }, [pathname]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const toggleGroup = (label: string) => {
     setExpandedGroup((prev) => {

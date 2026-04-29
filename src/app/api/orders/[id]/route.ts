@@ -4,6 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { canEditOrder, canViewOrder } from "@/lib/permissions";
 import { logActivity } from "@/lib/activity-log";
+import { deleteFile } from "@/lib/storage";
 
 const fullOrderInclude = {
   status: { select: { id: true, name: true, color: true, sortOrder: true } },
@@ -126,9 +127,20 @@ export async function DELETE(
   }
 
   const { id } = await ctx.params;
-  const order = await prisma.order.findFirst({ where: { id, deletedAt: null } });
+  const order = await prisma.order.findFirst({
+    where: { id, deletedAt: null },
+    select: { id: true, paymentReceiptUrl: true },
+  });
   if (!order) return NextResponse.json({ error: "الطلب غير موجود" }, { status: 404 });
 
   await prisma.order.update({ where: { id }, data: { deletedAt: new Date() } });
+
+  // Fire-and-forget: clean up blob receipt so storage doesn't accumulate orphans.
+  if (order.paymentReceiptUrl && !order.paymentReceiptUrl.startsWith("local://")) {
+    deleteFile(order.paymentReceiptUrl).catch((e) =>
+      console.error("[DELETE /api/orders/:id] blob cleanup failed:", e)
+    );
+  }
+
   return NextResponse.json({ data: { success: true } });
 }

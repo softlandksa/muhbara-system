@@ -57,9 +57,11 @@ export function ShippingStatusDialog({
   const [tracking, setTracking] = useState("");
   const [companyError, setCompanyError] = useState(false);
 
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (open) { setSubStatusId(""); setCompanyId(""); setTracking(""); setCompanyError(false); }
   }, [open]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const handleClose = () => {
     if (loading) return;

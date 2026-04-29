@@ -70,7 +70,14 @@ export async function uploadReceipt(fileBuffer: ArrayBuffer, claimedMime: string
     return { storedUrl: blob.url, mime: claimedMime };
   }
 
-  // Local filesystem fallback (dev only — Vercel FS is read-only)
+  // Production requires Vercel Blob — local FS is read-only on Vercel Lambda.
+  if (process.env.NODE_ENV === "production") {
+    throw new Error(
+      "متغير BLOB_READ_WRITE_TOKEN غير مكوّن. يرجى إضافته في إعدادات Vercel → Storage → Blob."
+    );
+  }
+
+  // Local filesystem fallback — development only.
   const { writeFile, mkdir } = await import("fs/promises");
   const dir = path.join(process.cwd(), "uploads", "receipts");
   await mkdir(dir, { recursive: true });
@@ -91,4 +98,17 @@ export async function fetchReceiptBuffer(storedUrl: string): Promise<{ buffer: A
   const buffer = await res.arrayBuffer();
   const mime = res.headers.get("content-type")?.split(";")[0] ?? "application/octet-stream";
   return { buffer, mime };
+}
+
+export async function deleteFile(storedUrl: string): Promise<void> {
+  if (storedUrl.startsWith("local://")) {
+    const rel = storedUrl.replace("local://", "");
+    const { unlink } = await import("fs/promises");
+    await unlink(path.join(process.cwd(), "uploads", rel));
+    return;
+  }
+  if (process.env.BLOB_READ_WRITE_TOKEN) {
+    const { del } = await import("@vercel/blob");
+    await del(storedUrl, { token: process.env.BLOB_READ_WRITE_TOKEN });
+  }
 }

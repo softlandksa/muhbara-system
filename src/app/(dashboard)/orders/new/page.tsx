@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect, useRef, useCallback } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { useForm, useFieldArray, useWatch } from "react-hook-form";
@@ -253,12 +253,12 @@ function ReceiptUpload({
     else onFileChange(Object.assign(f, { _validationError: err }) as File);
   };
 
-  const onDrop = useCallback((e: React.DragEvent) => {
+  const onDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setDragging(false);
     const f = e.dataTransfer.files[0];
     if (f) handle(f);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  };
 
   const onInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];

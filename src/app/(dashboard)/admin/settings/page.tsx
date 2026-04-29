@@ -900,7 +900,7 @@ function SubsPanel({ primary, onReload }: { primary: ShippingStatusPrimary; onRe
                 onChange={(e) => setSubForm({ ...subForm, marksOrderDelivered: e.target.checked })}
                 className="w-4 h-4"
               />
-              <Label htmlFor="marksDelivered" className="cursor-pointer">يُسجَّل هذا كـ"تم التوصيل" (يضبط تاريخ التسليم)</Label>
+              <Label htmlFor="marksDelivered" className="cursor-pointer">يُسجَّل هذا كـ&quot;تم التوصيل&quot; (يضبط تاريخ التسليم)</Label>
             </div>
           </div>
           <DialogFooter>

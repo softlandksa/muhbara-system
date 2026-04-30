@@ -12,35 +12,38 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { ROLE_LABELS } from "@/lib/permissions";
 import type { Role } from "@/types";
-import type { LiveReportData, PeriodStat, StatusInfo } from "@/app/api/reports/live/route";
+import type {
+  LiveReportData,
+  PeriodStat,
+  StatusInfo,
+  CurrencyBreakdown,
+} from "@/app/api/reports/live/route";
 
-// ─── Period keys & labels ─────────────────────────────────────────────────────
+// ─── Period keys ──────────────────────────────────────────────────────────────
 
 const PERIODS = ["today", "yesterday", "last7days", "thisMonth"] as const;
 type PeriodKey = (typeof PERIODS)[number];
 
-// ─── Centralized period color / theme map ─────────────────────────────────────
+// ─── Centralized period theme map ─────────────────────────────────────────────
 //
-// All Tailwind class names are written as full literal strings here so the JIT
+// All Tailwind class names are written as full literal strings so the JIT
 // scanner picks them up correctly (no dynamic concatenation).
 
 type PeriodThemeConfig = {
   label: string;
   icon: ReactNode;
-  // ── Top summary card ──
-  cardBg: string;       // gradient background classes
-  cardBorder: string;   // border color class
-  iconWrap: string;     // icon container bg + border
-  countCls: string;     // large order-count text color
-  revenueCls: string;   // revenue amount text color
-  divider: string;      // horizontal divider bg color
-  // ── Employee period block (inside employee card) ──
-  blockBase: string;    // resting background + border
-  blockHover: string;   // hover state classes (bg, border, shadow, lift)
-  labelCls: string;     // period label text color inside block
-  blockCount: string;   // count number text color inside block
-  blockRevenue: string; // revenue text color inside block
-  dot: string;          // activity indicator dot color
+  cardBg: string;
+  cardBorder: string;
+  iconWrap: string;
+  countCls: string;
+  revenueCls: string;
+  divider: string;
+  blockBase: string;
+  blockHover: string;
+  labelCls: string;
+  blockCount: string;
+  blockRevenue: string;
+  dot: string;
 };
 
 const PERIOD_THEME: Record<PeriodKey, PeriodThemeConfig> = {
@@ -110,10 +113,7 @@ const PERIOD_THEME: Record<PeriodKey, PeriodThemeConfig> = {
   },
 };
 
-// ─── Rotating accent palette for employee cards ───────────────────────────────
-//
-// Index 0 = sky, 1 = violet, 2 = emerald, 3 = amber, 4 = rose, 5 = indigo
-// Cycles back for > 6 employees.
+// ─── Employee accent palette ──────────────────────────────────────────────────
 
 type EmployeeAccent = {
   cardBorder: string;
@@ -144,9 +144,6 @@ function fmtRevenue(n: number) {
 }
 
 // ─── StatusBreakdown ─────────────────────────────────────────────────────────
-//
-// Uses the status colors stored in the DB (via the status.color field).
-// Period color is NOT applied here — the DB colors are the semantic signal.
 
 function StatusBreakdown({
   byStatus,
@@ -172,10 +169,7 @@ function StatusBreakdown({
             )}
           >
             <span className="flex items-center gap-1.5 min-w-0">
-              <span
-                className="h-2 w-2 rounded-full shrink-0"
-                style={{ backgroundColor: s.color }}
-              />
+              <span className="h-2 w-2 rounded-full shrink-0" style={{ backgroundColor: s.color }} />
               <span className="truncate">{s.name}</span>
             </span>
             <span className={cn("font-semibold tabular-nums shrink-0 mr-2", count > 0 && "text-foreground")}>
@@ -188,10 +182,101 @@ function StatusBreakdown({
   );
 }
 
-// ─── PeriodBlock ─────────────────────────────────────────────────────────────
+// ─── CurrencyBreakdownSection ─────────────────────────────────────────────────
 //
-// Used inside employee cards. Each block matches the color of its corresponding
-// top summary card via PERIOD_THEME.
+// compact=false → full version for the top OverallPeriodCard
+// compact=true  → tight version for employee PeriodBlock
+
+function CurrencyBreakdownSection({
+  byCurrency,
+  compact = false,
+}: {
+  byCurrency: CurrencyBreakdown[];
+  compact?: boolean;
+}) {
+  // In compact mode skip the section entirely when there's nothing to show
+  if (byCurrency.length === 0) {
+    if (compact) return null;
+    return (
+      <p className="text-xs text-muted-foreground mt-1">لا توجد بيانات</p>
+    );
+  }
+
+  if (compact) {
+    // ── Compact variant (employee period blocks) ──────────────────────────────
+    // One line per row, no row header labels, separated by |
+    return (
+      <div className="mt-2 space-y-1">
+        {/* Sales row */}
+        <div className="flex flex-wrap items-center gap-y-0.5">
+          <span className="text-[10px] text-muted-foreground ml-1">م.العملة:</span>
+          {byCurrency.map((c, i) => (
+            <span key={c.currencyCode} className="flex items-center text-[10px]">
+              {i > 0 && <span className="text-muted-foreground/50 mx-1">|</span>}
+              <span className="font-semibold">{c.currencyCode}</span>
+              <span className="text-muted-foreground mx-0.5">:</span>
+              <span className="tabular-nums">{fmtRevenue(c.totalSales)}</span>
+            </span>
+          ))}
+        </div>
+        {/* Orders count row */}
+        <div className="flex flex-wrap items-center gap-y-0.5">
+          <span className="text-[10px] text-muted-foreground ml-1">ط.العملة:</span>
+          {byCurrency.map((c, i) => (
+            <span key={c.currencyCode} className="flex items-center text-[10px]">
+              {i > 0 && <span className="text-muted-foreground/50 mx-1">|</span>}
+              <span className="font-semibold">{c.currencyCode}</span>
+              <span className="text-muted-foreground mx-0.5">:</span>
+              <span className="tabular-nums">{fmtNumber(c.orderCount)}</span>
+            </span>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  // ── Full variant (top summary cards) ─────────────────────────────────────────
+  return (
+    <div className="mt-3 space-y-2.5">
+      {/* Sales by currency */}
+      <div>
+        <p className="text-[11px] font-semibold text-muted-foreground mb-1">
+          المبيعات حسب العملة
+        </p>
+        <div className="flex flex-wrap items-center gap-y-1">
+          {byCurrency.map((c, i) => (
+            <span key={c.currencyCode} className="flex items-center text-xs">
+              {i > 0 && <span className="text-muted-foreground/50 mx-2">|</span>}
+              <span className="font-semibold">{c.currencyCode}</span>
+              <span className="text-muted-foreground mx-0.5">:</span>
+              <span className="tabular-nums">{fmtRevenue(c.totalSales)}</span>
+            </span>
+          ))}
+        </div>
+      </div>
+
+      {/* Orders count by currency */}
+      <div>
+        <p className="text-[11px] font-semibold text-muted-foreground mb-1">
+          عدد الطلبات حسب العملة
+        </p>
+        <div className="flex flex-wrap items-center gap-y-1">
+          {byCurrency.map((c, i) => (
+            <span key={c.currencyCode} className="flex items-center text-xs">
+              {i > 0 && <span className="text-muted-foreground/50 mx-2">|</span>}
+              <span className="font-semibold">{c.currencyCode}</span>
+              <span className="text-muted-foreground mx-0.5">:</span>
+              <span className="tabular-nums">{fmtNumber(c.orderCount)}</span>
+              <span className="text-muted-foreground mr-0.5"> طلب</span>
+            </span>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── PeriodBlock ─────────────────────────────────────────────────────────────
 
 function PeriodBlock({
   period,
@@ -238,13 +323,19 @@ function PeriodBlock({
       <div className="text-[10px] text-muted-foreground">إجمالي المبيعات</div>
 
       <StatusBreakdown byStatus={stat.byStatus} statuses={statuses} compact />
+
+      {/* Currency breakdown (compact) — shown only when data exists */}
+      {stat.byCurrency.length > 0 && (
+        <>
+          <div className="h-px bg-border/40 mt-2" />
+          <CurrencyBreakdownSection byCurrency={stat.byCurrency} compact />
+        </>
+      )}
     </div>
   );
 }
 
 // ─── OverallPeriodCard ────────────────────────────────────────────────────────
-//
-// The four large summary cards at the top of the page.
 
 function OverallPeriodCard({
   period,
@@ -271,6 +362,13 @@ function OverallPeriodCard({
           <Skeleton className="h-px w-full" />
           <div className="space-y-1.5 pt-1">
             {[1, 2, 3, 4].map((i) => <Skeleton key={i} className="h-3 w-full" />)}
+          </div>
+          <Skeleton className="h-px w-full" />
+          <div className="space-y-1.5 pt-1">
+            <Skeleton className="h-3 w-24" />
+            <Skeleton className="h-3 w-40" />
+            <Skeleton className="h-3 w-24" />
+            <Skeleton className="h-3 w-36" />
           </div>
         </CardContent>
       </Card>
@@ -303,25 +401,25 @@ function OverallPeriodCard({
           <span className="text-sm text-muted-foreground">طلب</span>
         </div>
 
-        {/* Revenue */}
+        {/* Total revenue */}
         <div className={cn("text-lg font-semibold mb-1", t.revenueCls)}>
           {fmtRevenue(stat.revenue)}
         </div>
         <div className="text-xs text-muted-foreground mb-4">إجمالي المبيعات</div>
 
-        {/* Divider */}
+        {/* Divider + status breakdown */}
         <div className={cn("h-px mb-3", t.divider)} />
-
         <StatusBreakdown byStatus={stat.byStatus} statuses={statuses} />
+
+        {/* Divider + currency breakdown */}
+        <div className={cn("h-px mt-4 mb-1", t.divider)} />
+        <CurrencyBreakdownSection byCurrency={stat.byCurrency} />
       </CardContent>
     </Card>
   );
 }
 
 // ─── EmployeeCard ─────────────────────────────────────────────────────────────
-//
-// Receives `index` so the accent color rotates through the palette.
-// Period blocks inside use the same PERIOD_THEME as the top summary cards.
 
 function EmployeeCard({
   employee,
@@ -342,7 +440,6 @@ function EmployeeCard({
         accent.cardBorder
       )}
     >
-      {/* Employee header — tinted with accent color */}
       <CardHeader className={cn("pb-3 pt-4 px-5 rounded-t-2xl", accent.headerBg)}>
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
@@ -353,7 +450,6 @@ function EmployeeCard({
               </p>
             )}
           </div>
-          {/* Role badge — styled with accent color */}
           <span
             className={cn(
               "shrink-0 inline-flex items-center rounded-full px-2.5 py-0.5",
@@ -368,7 +464,6 @@ function EmployeeCard({
         </div>
       </CardHeader>
 
-      {/* Period blocks — 2 × 2 grid, each colored by PERIOD_THEME */}
       <CardContent className="px-5 pb-5 pt-4">
         <div className="grid grid-cols-2 gap-2.5">
           {PERIODS.map((p) => (
@@ -380,7 +475,7 @@ function EmployeeCard({
   );
 }
 
-// ─── Loading skeleton for employee cards ──────────────────────────────────────
+// ─── Loading skeletons ────────────────────────────────────────────────────────
 
 function EmployeeCardSkeleton() {
   return (
@@ -401,8 +496,10 @@ function EmployeeCardSkeleton() {
               <div className="space-y-1 pt-1">
                 <Skeleton className="h-2.5 w-full" />
                 <Skeleton className="h-2.5 w-full" />
-                <Skeleton className="h-2.5 w-full" />
               </div>
+              <div className="h-px bg-border/30 mt-1" />
+              <Skeleton className="h-2.5 w-full" />
+              <Skeleton className="h-2.5 w-full" />
             </div>
           ))}
         </div>

@@ -6,14 +6,22 @@ import { startOfDay, endOfDay, subDays, startOfMonth } from "date-fns";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
+// Each row returned by the groupBy queries (employee × status × currency)
 type RawGroupRow = {
   createdById: string;
   statusId: string;
+  currencyId: string;
   _count: { id: number };
   _sum: { totalAmount: number | null };
 };
 
 export type StatusInfo = { id: string; name: string; color: string };
+
+export type CurrencyBreakdown = {
+  currencyCode: string;
+  totalSales: number;
+  orderCount: number;
+};
 
 export type PeriodStat = {
   count: number;
@@ -25,6 +33,7 @@ export type PeriodStat = {
     count: number;
     revenue: number;
   }[];
+  byCurrency: CurrencyBreakdown[];
 };
 
 export type EmployeeLiveStat = {
@@ -51,29 +60,61 @@ export type LiveReportData = {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function buildPeriodStat(rows: RawGroupRow[], statuses: StatusInfo[]): PeriodStat {
+/**
+ * Groups rows by currency and returns sales + order count per currency.
+ * Exported so it can be reused in other report routes if needed.
+ */
+export function getCurrencyBreakdown(
+  rows: RawGroupRow[],
+  currencyMap: Record<string, string>
+): CurrencyBreakdown[] {
+  const acc: Record<string, { totalSales: number; orderCount: number }> = {};
+
+  for (const row of rows) {
+    const code = currencyMap[row.currencyId] ?? row.currencyId;
+    if (!acc[code]) acc[code] = { totalSales: 0, orderCount: 0 };
+    acc[code].totalSales += row._sum.totalAmount ?? 0;
+    acc[code].orderCount += row._count.id;
+  }
+
+  return Object.entries(acc)
+    .map(([currencyCode, v]) => ({
+      currencyCode,
+      totalSales: Math.round(v.totalSales * 100) / 100,
+      orderCount: v.orderCount,
+    }))
+    .sort((a, b) => b.orderCount - a.orderCount); // highest-volume currency first
+}
+
+function buildPeriodStat(
+  rows: RawGroupRow[],
+  statuses: StatusInfo[],
+  currencyMap: Record<string, string>
+): PeriodStat {
   const count = rows.reduce((s, r) => s + r._count.id, 0);
   const revenue = rows.reduce((s, r) => s + (r._sum.totalAmount ?? 0), 0);
 
-  const byStatusMap: Record<string, { count: number; revenue: number }> = {};
+  // Aggregate by status (across all currencies)
+  const byStatusAcc: Record<string, { count: number; revenue: number }> = {};
   for (const row of rows) {
-    if (!byStatusMap[row.statusId]) byStatusMap[row.statusId] = { count: 0, revenue: 0 };
-    byStatusMap[row.statusId].count += row._count.id;
-    byStatusMap[row.statusId].revenue += row._sum.totalAmount ?? 0;
+    if (!byStatusAcc[row.statusId]) byStatusAcc[row.statusId] = { count: 0, revenue: 0 };
+    byStatusAcc[row.statusId].count += row._count.id;
+    byStatusAcc[row.statusId].revenue += row._sum.totalAmount ?? 0;
   }
 
   const byStatus = statuses.map((s) => ({
     statusId: s.id,
     name: s.name,
     color: s.color,
-    count: byStatusMap[s.id]?.count ?? 0,
-    revenue: Math.round((byStatusMap[s.id]?.revenue ?? 0) * 100) / 100,
+    count: byStatusAcc[s.id]?.count ?? 0,
+    revenue: Math.round((byStatusAcc[s.id]?.revenue ?? 0) * 100) / 100,
   }));
 
   return {
     count,
     revenue: Math.round(revenue * 100) / 100,
     byStatus,
+    byCurrency: getCurrencyBreakdown(rows, currencyMap),
   };
 }
 
@@ -104,13 +145,13 @@ export async function GET() {
     baseWhere.createdById = userId;
   }
 
-  // Build the four period date ranges using server time (consistent with other reports)
+  // Build the four period date ranges (server time — consistent with other reports)
   const now = new Date();
   const todayStart = startOfDay(now);
   const todayEnd = endOfDay(now);
   const yesterdayStart = startOfDay(subDays(now, 1));
   const yesterdayEnd = endOfDay(subDays(now, 1));
-  const last7Start = startOfDay(subDays(now, 6)); // today is day 1, so 6 days back = 7-day window
+  const last7Start = startOfDay(subDays(now, 6)); // today = day 1 → 6 days back = 7-day window
   const monthStart = startOfMonth(now);
 
   const withPeriod = (start: Date, end: Date) => ({
@@ -118,38 +159,45 @@ export async function GET() {
     orderDate: { gte: start, lte: end },
   });
 
-  // Run all heavy queries in a single parallel batch
-  const [statuses, todayRows, yesterdayRows, last7Rows, monthRows] = await Promise.all([
-    prisma.shippingStatusPrimary.findMany({
-      where: { isActive: true, deletedAt: null },
-      orderBy: { sortOrder: "asc" },
-      select: { id: true, name: true, color: true },
-    }),
-    prisma.order.groupBy({
-      by: ["createdById", "statusId"],
-      where: withPeriod(todayStart, todayEnd),
-      _count: { id: true },
-      _sum: { totalAmount: true },
-    }),
-    prisma.order.groupBy({
-      by: ["createdById", "statusId"],
-      where: withPeriod(yesterdayStart, yesterdayEnd),
-      _count: { id: true },
-      _sum: { totalAmount: true },
-    }),
-    prisma.order.groupBy({
-      by: ["createdById", "statusId"],
-      where: withPeriod(last7Start, todayEnd),
-      _count: { id: true },
-      _sum: { totalAmount: true },
-    }),
-    prisma.order.groupBy({
-      by: ["createdById", "statusId"],
-      where: withPeriod(monthStart, todayEnd),
-      _count: { id: true },
-      _sum: { totalAmount: true },
-    }),
-  ]);
+  // Single parallel batch: statuses + currencies + 4 period groupBys
+  const [statuses, currencies, todayRows, yesterdayRows, last7Rows, monthRows] =
+    await Promise.all([
+      prisma.shippingStatusPrimary.findMany({
+        where: { isActive: true, deletedAt: null },
+        orderBy: { sortOrder: "asc" },
+        select: { id: true, name: true, color: true },
+      }),
+      prisma.currency.findMany({
+        select: { id: true, code: true },
+      }),
+      prisma.order.groupBy({
+        by: ["createdById", "statusId", "currencyId"],
+        where: withPeriod(todayStart, todayEnd),
+        _count: { id: true },
+        _sum: { totalAmount: true },
+      }),
+      prisma.order.groupBy({
+        by: ["createdById", "statusId", "currencyId"],
+        where: withPeriod(yesterdayStart, yesterdayEnd),
+        _count: { id: true },
+        _sum: { totalAmount: true },
+      }),
+      prisma.order.groupBy({
+        by: ["createdById", "statusId", "currencyId"],
+        where: withPeriod(last7Start, todayEnd),
+        _count: { id: true },
+        _sum: { totalAmount: true },
+      }),
+      prisma.order.groupBy({
+        by: ["createdById", "statusId", "currencyId"],
+        where: withPeriod(monthStart, todayEnd),
+        _count: { id: true },
+        _sum: { totalAmount: true },
+      }),
+    ]);
+
+  // currencyId → code lookup (e.g. "clxyz" → "EGP")
+  const currencyMap = Object.fromEntries(currencies.map((c) => [c.id, c.code]));
 
   // Collect unique employee IDs from all result rows
   const allRows = [...todayRows, ...yesterdayRows, ...last7Rows, ...monthRows];
@@ -159,20 +207,17 @@ export async function GET() {
   let employees: { id: string; name: string; role: string }[];
 
   if (role === "ADMIN" || role === "GENERAL_MANAGER") {
-    // Show only employees who have at least one order in any of the 4 periods
     employees = await prisma.user.findMany({
       where: { isActive: true, id: { in: seenEmployeeIds } },
       select: { id: true, name: true, role: true },
       orderBy: { name: "asc" },
     });
   } else if (role === "SALES_MANAGER" && managedTeamId) {
-    // Show all active team members (including those with 0 orders in range)
     const teamMembers = await prisma.user.findMany({
       where: { isActive: true, teamId: managedTeamId },
       select: { id: true, name: true, role: true },
       orderBy: { name: "asc" },
     });
-    // Include any employees from results not on the team (edge case: ex-members)
     const teamMemberIds = new Set(teamMembers.map((u) => u.id));
     const extraIds = seenEmployeeIds.filter((id) => !teamMemberIds.has(id));
     if (extraIds.length > 0) {
@@ -185,7 +230,6 @@ export async function GET() {
       employees = teamMembers;
     }
   } else {
-    // Own data only — security boundary: other employees are never returned
     const self = await prisma.user.findUnique({
       where: { id: userId },
       select: { id: true, name: true, role: true },
@@ -193,12 +237,12 @@ export async function GET() {
     employees = self ? [self] : [];
   }
 
-  // Build overall period stats (across all visible employees)
+  // Build overall period stats
   const overall = {
-    today: buildPeriodStat(todayRows, statuses),
-    yesterday: buildPeriodStat(yesterdayRows, statuses),
-    last7days: buildPeriodStat(last7Rows, statuses),
-    thisMonth: buildPeriodStat(monthRows, statuses),
+    today: buildPeriodStat(todayRows, statuses, currencyMap),
+    yesterday: buildPeriodStat(yesterdayRows, statuses, currencyMap),
+    last7days: buildPeriodStat(last7Rows, statuses, currencyMap),
+    thisMonth: buildPeriodStat(monthRows, statuses, currencyMap),
   };
 
   // Build per-employee period stats
@@ -208,19 +252,23 @@ export async function GET() {
     role: emp.role,
     today: buildPeriodStat(
       todayRows.filter((r) => r.createdById === emp.id),
-      statuses
+      statuses,
+      currencyMap
     ),
     yesterday: buildPeriodStat(
       yesterdayRows.filter((r) => r.createdById === emp.id),
-      statuses
+      statuses,
+      currencyMap
     ),
     last7days: buildPeriodStat(
       last7Rows.filter((r) => r.createdById === emp.id),
-      statuses
+      statuses,
+      currencyMap
     ),
     thisMonth: buildPeriodStat(
       monthRows.filter((r) => r.createdById === emp.id),
-      statuses
+      statuses,
+      currencyMap
     ),
   }));
 

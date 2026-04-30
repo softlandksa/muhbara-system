@@ -132,6 +132,32 @@ const EMPLOYEE_ACCENTS: EmployeeAccent[] = [
   { cardBorder: "border-indigo-200",  headerBg: "bg-indigo-50/50",  badgeBg: "bg-indigo-100",  badgeText: "text-indigo-700",  badgeBorder: "border-indigo-200"  },
 ];
 
+// ─── Currency color map ───────────────────────────────────────────────────────
+//
+// All class names are full literal strings — no dynamic concatenation.
+
+type CurrencyColorConfig = {
+  pillBg: string;
+  pillBorder: string;
+  codeCls: string;
+  valueCls: string;
+};
+
+const CURRENCY_COLORS: Record<string, CurrencyColorConfig> = {
+  EGP: { pillBg: "bg-blue-50",    pillBorder: "border-blue-200",    codeCls: "text-blue-600",    valueCls: "text-blue-900"    },
+  SAR: { pillBg: "bg-emerald-50", pillBorder: "border-emerald-200", codeCls: "text-emerald-600", valueCls: "text-emerald-900" },
+  USD: { pillBg: "bg-amber-50",   pillBorder: "border-amber-200",   codeCls: "text-amber-600",   valueCls: "text-amber-900"   },
+  AED: { pillBg: "bg-violet-50",  pillBorder: "border-violet-200",  codeCls: "text-violet-600",  valueCls: "text-violet-900"  },
+};
+
+const CURRENCY_DEFAULT: CurrencyColorConfig = {
+  pillBg: "bg-slate-50", pillBorder: "border-slate-200", codeCls: "text-slate-500", valueCls: "text-slate-800",
+};
+
+function getCurrencyColor(code: string): CurrencyColorConfig {
+  return CURRENCY_COLORS[code] ?? CURRENCY_DEFAULT;
+}
+
 // ─── Formatting helpers ───────────────────────────────────────────────────────
 
 function fmtNumber(n: number) {
@@ -184,8 +210,8 @@ function StatusBreakdown({
 
 // ─── CurrencyBreakdownSection ─────────────────────────────────────────────────
 //
-// compact=false → full version for the top OverallPeriodCard
-// compact=true  → tight version for employee PeriodBlock
+// compact=false → full pill variant for the top OverallPeriodCard
+// compact=true  → small pill variant for employee PeriodBlock
 
 function CurrencyBreakdownSection({
   byCurrency,
@@ -194,42 +220,67 @@ function CurrencyBreakdownSection({
   byCurrency: CurrencyBreakdown[];
   compact?: boolean;
 }) {
-  // In compact mode skip the section entirely when there's nothing to show
   if (byCurrency.length === 0) {
     if (compact) return null;
-    return (
-      <p className="text-xs text-muted-foreground mt-1">لا توجد بيانات</p>
-    );
+    return <p className="text-xs text-muted-foreground mt-1">لا توجد بيانات</p>;
   }
 
   if (compact) {
     // ── Compact variant (employee period blocks) ──────────────────────────────
-    // One line per row, no row header labels, separated by |
     return (
-      <div className="mt-2 space-y-1">
-        {/* Sales row */}
-        <div className="flex flex-wrap items-center gap-y-0.5">
-          <span className="text-[10px] text-muted-foreground ml-1">م.العملة:</span>
-          {byCurrency.map((c, i) => (
-            <span key={c.currencyCode} className="flex items-center text-[10px]">
-              {i > 0 && <span className="text-muted-foreground/50 mx-1">|</span>}
-              <span className="font-semibold">{c.currencyCode}</span>
-              <span className="text-muted-foreground mx-0.5">:</span>
-              <span className="tabular-nums">{fmtRevenue(c.totalSales)}</span>
-            </span>
-          ))}
+      <div className="mt-2 space-y-1.5">
+        <div className="space-y-1">
+          <span className="text-[10px] text-muted-foreground">م.العملة</span>
+          <div className="flex flex-wrap gap-1">
+            {byCurrency.map((c) => {
+              const col = getCurrencyColor(c.currencyCode);
+              return (
+                <span
+                  key={`s-${c.currencyCode}`}
+                  className={cn(
+                    "inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5",
+                    col.pillBg,
+                    col.pillBorder
+                  )}
+                >
+                  <span className={cn("font-semibold text-[10px]", col.codeCls)}>
+                    {c.currencyCode}
+                  </span>
+                  <span className="text-[9px] text-muted-foreground/40">·</span>
+                  <span className={cn("font-bold tabular-nums text-[10px]", col.valueCls)}>
+                    {fmtRevenue(c.totalSales)}
+                  </span>
+                </span>
+              );
+            })}
+          </div>
         </div>
-        {/* Orders count row */}
-        <div className="flex flex-wrap items-center gap-y-0.5">
-          <span className="text-[10px] text-muted-foreground ml-1">ط.العملة:</span>
-          {byCurrency.map((c, i) => (
-            <span key={c.currencyCode} className="flex items-center text-[10px]">
-              {i > 0 && <span className="text-muted-foreground/50 mx-1">|</span>}
-              <span className="font-semibold">{c.currencyCode}</span>
-              <span className="text-muted-foreground mx-0.5">:</span>
-              <span className="tabular-nums">{fmtNumber(c.orderCount)}</span>
-            </span>
-          ))}
+
+        <div className="space-y-1">
+          <span className="text-[10px] text-muted-foreground">ط.العملة</span>
+          <div className="flex flex-wrap gap-1">
+            {byCurrency.map((c) => {
+              const col = getCurrencyColor(c.currencyCode);
+              return (
+                <span
+                  key={`o-${c.currencyCode}`}
+                  className={cn(
+                    "inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5",
+                    col.pillBg,
+                    col.pillBorder
+                  )}
+                >
+                  <span className={cn("font-semibold text-[10px]", col.codeCls)}>
+                    {c.currencyCode}
+                  </span>
+                  <span className="text-[9px] text-muted-foreground/40">·</span>
+                  <span className={cn("font-bold tabular-nums text-[10px]", col.valueCls)}>
+                    {fmtNumber(c.orderCount)}
+                  </span>
+                </span>
+              );
+            })}
+          </div>
         </div>
       </div>
     );
@@ -237,39 +288,63 @@ function CurrencyBreakdownSection({
 
   // ── Full variant (top summary cards) ─────────────────────────────────────────
   return (
-    <div className="mt-3 space-y-2.5">
-      {/* Sales by currency */}
-      <div>
-        <p className="text-[11px] font-semibold text-muted-foreground mb-1">
+    <div className="mt-3 space-y-3">
+      <div className="space-y-1.5">
+        <p className="text-[11px] font-semibold text-muted-foreground">
           المبيعات حسب العملة
         </p>
-        <div className="flex flex-wrap items-center gap-y-1">
-          {byCurrency.map((c, i) => (
-            <span key={c.currencyCode} className="flex items-center text-xs">
-              {i > 0 && <span className="text-muted-foreground/50 mx-2">|</span>}
-              <span className="font-semibold">{c.currencyCode}</span>
-              <span className="text-muted-foreground mx-0.5">:</span>
-              <span className="tabular-nums">{fmtRevenue(c.totalSales)}</span>
-            </span>
-          ))}
+        <div className="flex flex-wrap gap-1.5">
+          {byCurrency.map((c) => {
+            const col = getCurrencyColor(c.currencyCode);
+            return (
+              <span
+                key={`s-${c.currencyCode}`}
+                className={cn(
+                  "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1",
+                  col.pillBg,
+                  col.pillBorder
+                )}
+              >
+                <span className={cn("text-xs font-semibold", col.codeCls)}>
+                  {c.currencyCode}
+                </span>
+                <span className="text-[10px] text-muted-foreground/40">·</span>
+                <span className={cn("text-xs font-bold tabular-nums", col.valueCls)}>
+                  {fmtRevenue(c.totalSales)}
+                </span>
+              </span>
+            );
+          })}
         </div>
       </div>
 
-      {/* Orders count by currency */}
-      <div>
-        <p className="text-[11px] font-semibold text-muted-foreground mb-1">
+      <div className="space-y-1.5">
+        <p className="text-[11px] font-semibold text-muted-foreground">
           عدد الطلبات حسب العملة
         </p>
-        <div className="flex flex-wrap items-center gap-y-1">
-          {byCurrency.map((c, i) => (
-            <span key={c.currencyCode} className="flex items-center text-xs">
-              {i > 0 && <span className="text-muted-foreground/50 mx-2">|</span>}
-              <span className="font-semibold">{c.currencyCode}</span>
-              <span className="text-muted-foreground mx-0.5">:</span>
-              <span className="tabular-nums">{fmtNumber(c.orderCount)}</span>
-              <span className="text-muted-foreground mr-0.5"> طلب</span>
-            </span>
-          ))}
+        <div className="flex flex-wrap gap-1.5">
+          {byCurrency.map((c) => {
+            const col = getCurrencyColor(c.currencyCode);
+            return (
+              <span
+                key={`o-${c.currencyCode}`}
+                className={cn(
+                  "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1",
+                  col.pillBg,
+                  col.pillBorder
+                )}
+              >
+                <span className={cn("text-xs font-semibold", col.codeCls)}>
+                  {c.currencyCode}
+                </span>
+                <span className="text-[10px] text-muted-foreground/40">·</span>
+                <span className={cn("text-xs font-bold tabular-nums", col.valueCls)}>
+                  {fmtNumber(c.orderCount)}
+                </span>
+                <span className="text-[10px] text-muted-foreground"> طلب</span>
+              </span>
+            );
+          })}
         </div>
       </div>
     </div>

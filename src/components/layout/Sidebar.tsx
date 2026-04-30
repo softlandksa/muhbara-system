@@ -83,6 +83,12 @@ const navItems: NavItem[] = [
     roles: ["ADMIN", "GENERAL_MANAGER", "SALES_MANAGER", "SALES", "SUPPORT", "SHIPPING", "FOLLOWUP", "HR"] as Role[],
     children: [
       {
+        label: "تقرير Live",
+        href: "/reports/live",
+        icon: <Radio size={18} />,
+        roles: ["ADMIN", "GENERAL_MANAGER", "SALES_MANAGER", "SALES", "SUPPORT"],
+      },
+      {
         label: "تقارير المبيعات",
         href: "/reports/sales",
         icon: <BarChart3 size={18} />,
@@ -143,12 +149,6 @@ const navItems: NavItem[] = [
         href: "/reports/leaderboard",
         icon: <Trophy size={18} />,
         roles: ["ADMIN", "GENERAL_MANAGER", "SALES_MANAGER"],
-      },
-      {
-        label: "تقرير Live",
-        href: "/reports/live",
-        icon: <Radio size={18} />,
-        roles: ["ADMIN", "GENERAL_MANAGER", "SALES_MANAGER", "SALES", "SUPPORT"],
       },
     ],
   },

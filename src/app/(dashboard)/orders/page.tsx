@@ -22,6 +22,9 @@ import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
+import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -759,11 +762,28 @@ function OrdersPageInner({ setImportOpen }: { setImportOpen: (open: boolean) => 
   const [filterOpen, setFilterOpen] = useState(false);
   const [dateFromOpen, setDateFromOpen] = useState(false);
   const [dateToOpen, setDateToOpen] = useState(false);
+
+  // Temporary filter state — only committed to URL when user clicks "تطبيق الفلتر"
+  const [tempStatus, setTempStatus] = useState(statusParams[0] ?? "");
+  const [tempDateFrom, setTempDateFrom] = useState(dateFrom);
+  const [tempDateTo, setTempDateTo] = useState(dateTo);
+  const [tempCreatedById, setTempCreatedById] = useState(createdByIdParam);
   const [exportLoading, setExportLoading] = useState(false);
   const [bulkStatusOpen, setBulkStatusOpen] = useState(false);
   const [bulkDeleteConfirm, setBulkDeleteConfirm] = useState(false);
   const [bulkDeleteLoading, setBulkDeleteLoading] = useState(false);
   const [exportFilterConfirmOpen, setExportFilterConfirmOpen] = useState(false);
+
+  // Sync temp filter state from URL each time the popover opens
+  useEffect(() => {
+    if (filterOpen) {
+      setTempStatus(statusParams[0] ?? "");
+      setTempDateFrom(dateFrom);
+      setTempDateTo(dateTo);
+      setTempCreatedById(createdByIdParam);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filterOpen]);
 
   // ── Debounce search ──
   useEffect(() => {
@@ -785,16 +805,6 @@ function OrdersPageInner({ setImportOpen }: { setImportOpen: (open: boolean) => 
     if (key !== "page") params.set("page", "1");
     router.replace(`${pathname}?${params.toString()}`);
   }, [searchParams, pathname, router]);
-
-  const setStatusFilter = useCallback((statusId: string) => {
-    const params = new URLSearchParams(searchParams.toString());
-    params.delete("status");
-    if (statusId) params.append("status", statusId);
-    params.set("page", "1");
-    router.replace(`${pathname}?${params.toString()}`);
-  }, [searchParams, pathname, router]);
-
-  const statusParam = statusParams[0] ?? "";
 
   // ── Query ──
   const queryString = searchParams.toString();
@@ -981,7 +991,26 @@ function OrdersPageInner({ setImportOpen }: { setImportOpen: (open: boolean) => 
 
   const hasActiveFilters = statusParams.length > 0 || dateFrom || dateTo || !!createdByIdParam;
 
+  const applyFilters = () => {
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete("status");
+    if (tempStatus) params.append("status", tempStatus);
+    if (tempDateFrom) params.set("dateFrom", tempDateFrom);
+    else params.delete("dateFrom");
+    if (tempDateTo) params.set("dateTo", tempDateTo);
+    else params.delete("dateTo");
+    if (tempCreatedById) params.set("createdById", tempCreatedById);
+    else params.delete("createdById");
+    params.set("page", "1");
+    router.replace(`${pathname}?${params.toString()}`);
+    setFilterOpen(false);
+  };
+
   const clearFilters = () => {
+    setTempStatus("");
+    setTempDateFrom("");
+    setTempDateTo("");
+    setTempCreatedById("");
     const params = new URLSearchParams(searchParams.toString());
     params.delete("status");
     params.delete("dateFrom");
@@ -989,6 +1018,7 @@ function OrdersPageInner({ setImportOpen }: { setImportOpen: (open: boolean) => 
     params.delete("createdById");
     params.set("page", "1");
     router.replace(`${pathname}?${params.toString()}`);
+    setFilterOpen(false);
   };
 
   return (
@@ -1047,73 +1077,66 @@ function OrdersPageInner({ setImportOpen }: { setImportOpen: (open: boolean) => 
             {hasActiveFilters && <span>فلتر</span>}
           </PopoverTrigger>
           <PopoverContent className="w-80 p-4 space-y-4" align="end">
+            {/* Status dropdown */}
             <div className="space-y-2">
               <Label className="text-sm font-medium">الحالة</Label>
               {statusesLoading ? (
                 <Skeleton className="h-9 w-full" />
               ) : (
-                <div className="flex flex-col rounded-md border overflow-hidden">
-                  <button
-                    type="button"
-                    onClick={() => setStatusFilter("")}
-                    className={cn(
-                      "flex items-center gap-2 px-3 py-2 text-sm text-right w-full hover:bg-muted transition-colors",
-                      !statusParam && "bg-muted font-medium"
-                    )}
-                  >
-                    <span className="text-muted-foreground">كل الحالات</span>
-                  </button>
-                  {statuses.map((s) => (
-                    <button
-                      key={s.id}
-                      type="button"
-                      onClick={() => setStatusFilter(s.id)}
-                      className={cn(
-                        "flex items-center gap-2 px-3 py-2 text-sm text-right w-full hover:bg-muted transition-colors border-t",
-                        statusParam === s.id && "bg-muted font-medium"
-                      )}
-                    >
-                      <span className="h-2.5 w-2.5 rounded-full shrink-0" style={{ backgroundColor: s.color }} />
-                      <span style={{ color: s.color }}>{s.name}</span>
-                    </button>
-                  ))}
-                </div>
+                <Select value={tempStatus} onValueChange={(v) => setTempStatus(v ?? "")}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="كل الحالات" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="">كل الحالات</SelectItem>
+                    {statuses.map((s) => (
+                      <SelectItem key={s.id} value={s.id}>
+                        <span className="flex items-center gap-2">
+                          <span className="h-2.5 w-2.5 rounded-full shrink-0 inline-block" style={{ backgroundColor: s.color }} />
+                          <span style={{ color: s.color }}>{s.name}</span>
+                        </span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               )}
             </div>
 
+            {/* From date */}
             <div className="space-y-2">
               <Label className="text-sm font-medium">من تاريخ</Label>
               <Popover open={dateFromOpen} onOpenChange={setDateFromOpen}>
                 <PopoverTrigger
                   className="flex h-9 w-full items-center justify-between rounded-lg border border-input bg-transparent px-3 py-2 text-sm"
                 >
-                  <span>{dateFrom || "اختر تاريخاً"}</span>
+                  <span className={tempDateFrom ? "" : "text-muted-foreground"}>{tempDateFrom || "اختر تاريخاً"}</span>
                   <CalendarIcon className="h-4 w-4 opacity-50" />
                 </PopoverTrigger>
                 <PopoverContent className="w-auto p-0">
                   <Calendar
                     mode="single"
-                    selected={dateFrom ? new Date(dateFrom) : undefined}
-                    onDayClick={(d) => { updateParam("dateFrom", format(d, "yyyy-MM-dd")); setDateFromOpen(false); }}
+                    selected={tempDateFrom ? new Date(tempDateFrom) : undefined}
+                    onDayClick={(d) => { setTempDateFrom(format(d, "yyyy-MM-dd")); setDateFromOpen(false); }}
                   />
                 </PopoverContent>
               </Popover>
             </div>
 
+            {/* To date */}
             <div className="space-y-2">
               <Label className="text-sm font-medium">إلى تاريخ</Label>
               <Popover open={dateToOpen} onOpenChange={setDateToOpen}>
                 <PopoverTrigger
                   className="flex h-9 w-full items-center justify-between rounded-lg border border-input bg-transparent px-3 py-2 text-sm"
                 >
-                  <span>{dateTo || "اختر تاريخاً"}</span>
+                  <span className={tempDateTo ? "" : "text-muted-foreground"}>{tempDateTo || "اختر تاريخاً"}</span>
                   <CalendarIcon className="h-4 w-4 opacity-50" />
                 </PopoverTrigger>
                 <PopoverContent className="w-auto p-0">
                   <Calendar
                     mode="single"
-                    selected={dateTo ? new Date(dateTo) : undefined}
-                    onDayClick={(d) => { updateParam("dateTo", format(d, "yyyy-MM-dd")); setDateToOpen(false); }}
+                    selected={tempDateTo ? new Date(tempDateTo) : undefined}
+                    onDayClick={(d) => { setTempDateTo(format(d, "yyyy-MM-dd")); setDateToOpen(false); }}
                   />
                 </PopoverContent>
               </Popover>
@@ -1122,7 +1145,7 @@ function OrdersPageInner({ setImportOpen }: { setImportOpen: (open: boolean) => 
             {/* Employee filter — managers/admins only */}
             {canFilterByEmployee && (
               <div className="space-y-2">
-                <Label className="text-sm font-medium">تصفية حسب الموظف</Label>
+                <Label className="text-sm font-medium">الموظف</Label>
                 {usersLoading ? (
                   <Skeleton className="h-9 w-full" />
                 ) : (
@@ -1131,20 +1154,24 @@ function OrdersPageInner({ setImportOpen }: { setImportOpen: (open: boolean) => 
                       { value: "", label: "كل الموظفين" },
                       ...filterableUsers.map((u) => ({ value: u.id, label: u.name })),
                     ]}
-                    value={createdByIdParam}
-                    onChange={(v) => updateParam("createdById", v || null)}
+                    value={tempCreatedById}
+                    onChange={(v) => setTempCreatedById(v || "")}
                     placeholder="كل الموظفين"
                   />
                 )}
               </div>
             )}
 
-            {hasActiveFilters && (
+            {/* Action buttons */}
+            <div className="flex flex-col gap-2 pt-1 border-t">
+              <Button size="sm" className="w-full" onClick={applyFilters}>
+                تطبيق الفلتر
+              </Button>
               <Button variant="ghost" size="sm" className="w-full" onClick={clearFilters}>
                 <X className="h-3 w-3 ml-1" />
                 مسح الفلاتر
               </Button>
-            )}
+            </div>
           </PopoverContent>
         </Popover>
       </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { signIn } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
@@ -20,9 +20,43 @@ const loginSchema = z.object({
 
 type LoginForm = z.infer<typeof loginSchema>;
 
+function getErrorMessage(code: string | null | undefined): string {
+  switch (code) {
+    case "user_not_found":
+      return "البريد الإلكتروني غير موجود";
+    case "invalid_password":
+      return "كلمة المرور غير صحيحة";
+    case "database_error":
+      return "تعذر الاتصال بقاعدة البيانات";
+    case "account_disabled":
+      return "الحساب معطّل. تواصل مع المدير";
+    case "CredentialsSignin":
+      return "البريد الإلكتروني أو كلمة المرور غير صحيحة";
+    case "undefined":
+    case undefined:
+    case null:
+      return "حدث خطأ في الخادم. تأكد من إعداد متغيرات البيئة (NEXTAUTH_SECRET)";
+    default:
+      return "حدث خطأ أثناء تسجيل الدخول";
+  }
+}
+
 export default function LoginPage() {
   const router = useRouter();
   const [showPassword, setShowPassword] = useState(false);
+
+  // Handle URL ?error= param — produced when NextAuth redirects (e.g. missing NEXTAUTH_SECRET)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const urlError = params.get("error");
+    if (urlError) {
+      toast.error(getErrorMessage(urlError));
+      // Remove the error param from the address bar without a page reload
+      const clean = new URL(window.location.href);
+      clean.searchParams.delete("error");
+      window.history.replaceState({}, "", clean.toString());
+    }
+  }, []);
 
   const {
     register,
@@ -40,7 +74,7 @@ export default function LoginPage() {
     });
 
     if (result?.error) {
-      toast.error(result.error);
+      toast.error(getErrorMessage(result.error));
     } else {
       router.push("/");
       router.refresh();

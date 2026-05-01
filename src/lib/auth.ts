@@ -13,26 +13,62 @@ export const authOptions: NextAuthOptions = {
         password: { label: "كلمة المرور", type: "password" },
       },
       async authorize(credentials) {
-        try {
-          console.log("Login attempt:", credentials?.email);
-
-          if (!credentials?.email || !credentials?.password) {
-            throw new Error("البريد الإلكتروني وكلمة المرور مطلوبان");
-          }
-
-          if (credentials.email === "admin@test.com" && credentials.password === "123456") {
-            return {
-              id: "1",
-              name: "Admin",
-              email: "admin@test.com",
-            };
-          }
-
-          return null;
-        } catch (error) {
-          console.error("AUTH ERROR:", error);
-          throw new Error("Login failed");
+        if (!credentials?.email || !credentials?.password) {
+          throw new Error("auth_error");
         }
+
+        const email = credentials.email.toLowerCase().trim();
+        console.log("[AUTH] Login attempt:", email);
+
+        let user;
+        try {
+          user = await prisma.user.findUnique({
+            where: { email },
+            select: {
+              id: true,
+              name: true,
+              email: true,
+              passwordHash: true,
+              role: true,
+              teamId: true,
+              isActive: true,
+            },
+          });
+        } catch (dbError) {
+          console.error("[AUTH] AUTH_DATABASE_ERROR:", dbError);
+          throw new Error("database_error");
+        }
+
+        if (!user) {
+          console.log("[AUTH] AUTH_USER_NOT_FOUND:", email);
+          throw new Error("user_not_found");
+        }
+
+        if (!user.isActive) {
+          console.log("[AUTH] AUTH_ACCOUNT_DISABLED:", email);
+          throw new Error("auth_error");
+        }
+
+        if (!user.passwordHash) {
+          console.error("[AUTH] AUTH_PASSWORD_HASH_MISSING:", email);
+          throw new Error("auth_error");
+        }
+
+        const isValid = await bcrypt.compare(credentials.password, user.passwordHash);
+        if (!isValid) {
+          console.log("[AUTH] AUTH_INVALID_PASSWORD:", email);
+          throw new Error("invalid_password");
+        }
+
+        console.log("[AUTH] AUTH_SUCCESS:", email, "role:", user.role);
+
+        return {
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          role: user.role,
+          teamId: user.teamId,
+        };
       },
     }),
   ],
@@ -61,7 +97,7 @@ export const authOptions: NextAuthOptions = {
   },
   session: {
     strategy: "jwt",
-    maxAge: 24 * 60 * 60, // 24 hours
+    maxAge: 24 * 60 * 60,
   },
   secret: process.env.NEXTAUTH_SECRET,
 };

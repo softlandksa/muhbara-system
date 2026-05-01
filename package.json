@@ -14,6 +14,7 @@
     "db:seed": "tsx prisma/seed.ts",
     "db:studio": "prisma studio",
     "db:push": "prisma db push",
+    "reset:admin": "tsx scripts/reset-admin.ts",
     "test": "vitest run"
   },
   "prisma": {

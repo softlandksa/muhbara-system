@@ -1,5 +1,8 @@
 import { JWT } from "google-auth-library";
 
+// ── Module-level OAuth token cache (valid for 50 min within a single invocation) ──
+let _cachedToken: { value: string; expiresAt: number } | null = null;
+
 function createAuth(): JWT {
   const clientEmail = process.env.GOOGLE_SHEETS_CLIENT_EMAIL;
   const rawKey = process.env.GOOGLE_SHEETS_PRIVATE_KEY;
@@ -16,9 +19,28 @@ function createAuth(): JWT {
 }
 
 async function getAccessToken(): Promise<string> {
-  const tokenResponse = await createAuth().getAccessToken();
-  if (!tokenResponse.token) throw new Error("فشل الحصول على رمز OAuth من Google");
-  return tokenResponse.token;
+  const now = Date.now();
+  if (_cachedToken && _cachedToken.expiresAt > now) {
+    return _cachedToken.value;
+  }
+
+  console.log("[google-sheets] requesting OAuth token for service account...");
+  const auth = createAuth();
+  let token: string | null | undefined;
+  try {
+    const response = await auth.getAccessToken();
+    token = response.token;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("[google-sheets] OAuth token request failed:", msg);
+    throw new Error(`فشل الحصول على رمز OAuth من Google: ${msg}`);
+  }
+  if (!token) {
+    throw new Error("فشل الحصول على رمز OAuth من Google: الرمز فارغ");
+  }
+  console.log("[google-sheets] OAuth token obtained successfully");
+  _cachedToken = { value: token, expiresAt: now + 50 * 60 * 1000 };
+  return token;
 }
 
 /** Wraps a sheet name with single-quotes when it contains spaces or special chars. */
@@ -58,16 +80,62 @@ export type WriteBackEntry = {
   errorMessage: string;
 };
 
-/** Reads all rows from the configured Google Sheet. */
-export async function readSheet(): Promise<SheetData> {
-  const spreadsheetId = process.env.GOOGLE_SHEETS_SPREADSHEET_ID;
-  const sheetName = process.env.GOOGLE_SHEETS_SHEET_NAME;
-  if (!spreadsheetId) throw new Error("GOOGLE_SHEETS_SPREADSHEET_ID غير مكوّن");
-  if (!sheetName) throw new Error("GOOGLE_SHEETS_SHEET_NAME غير مكوّن");
+/**
+ * Lists all sheet/tab names in the workbook, in their display order.
+ */
+export async function listSheets(spreadsheetId: string): Promise<string[]> {
+  const token = await getAccessToken();
+  const url =
+    `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}` +
+    `?fields=sheets.properties.title`;
 
-  const readRange =
-    process.env.GOOGLE_SHEETS_RANGE ??
-    `${quoteSheetName(sheetName)}!A:Z`;
+  console.log(`[google-sheets] listing sheets in spreadsheet="${spreadsheetId}"`);
+  const res = await fetch(url, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  if (!res.ok) {
+    const body = await res.text();
+    console.error(
+      `[google-sheets] list sheets failed — HTTP ${res.status}: ${body.slice(0, 400)}`
+    );
+    throw new Error(
+      `فشل قراءة قائمة الأوراق من Google Sheets (${res.status}): ${body.slice(0, 200)}`
+    );
+  }
+
+  const json = (await res.json()) as {
+    sheets?: { properties?: { title?: string } }[];
+  };
+  const names = (json.sheets ?? [])
+    .map((s) => s.properties?.title ?? "")
+    .filter(Boolean);
+
+  console.log(`[google-sheets] found ${names.length} sheet(s): ${names.join(", ")}`);
+  return names;
+}
+
+/**
+ * Reads all rows from a specific sheet/tab by name.
+ *
+ * `columnRange` defaults to the GOOGLE_SHEETS_RANGE env var or "A:Z".
+ * Any sheet-name prefix in that env var (e.g. "Sheet1!A:S") is stripped automatically
+ * so only the column range ("A:S") is used.
+ */
+export async function readSheetByName(
+  spreadsheetId: string,
+  sheetName: string,
+  columnRange?: string
+): Promise<SheetData> {
+  const col = columnRange ?? process.env.GOOGLE_SHEETS_RANGE ?? "A:Z";
+  // Strip any leading "SheetName!" prefix so GOOGLE_SHEETS_RANGE can be either
+  // "A:T" (new style) or "Sheet1!A:T" (old style) without breaking.
+  const cleanCol = col.includes("!") ? col.split("!").slice(1).join("!") : col;
+  const readRange = `${quoteSheetName(sheetName)}!${cleanCol}`;
+
+  console.log(
+    `[google-sheets] reading spreadsheet="${spreadsheetId}" sheet="${sheetName}" range="${readRange}"`
+  );
 
   const token = await getAccessToken();
   const url =
@@ -80,19 +148,31 @@ export async function readSheet(): Promise<SheetData> {
 
   if (!res.ok) {
     const body = await res.text();
-    throw new Error(`فشل قراءة Google Sheets (${res.status}): ${body.slice(0, 200)}`);
+    console.error(
+      `[google-sheets] read failed — sheet="${sheetName}" HTTP ${res.status}: ${body.slice(0, 400)}`
+    );
+    throw new Error(
+      `فشل قراءة الورقة "${sheetName}" من Google Sheets (${res.status}): ${body.slice(0, 200)}`
+    );
   }
 
   const json = (await res.json()) as { values?: unknown[][] };
   const rawValues = json.values ?? [];
+
+  console.log(
+    `[google-sheets] sheet="${sheetName}" — total rows (including header): ${rawValues.length}`
+  );
 
   if (rawValues.length === 0) {
     return { spreadsheetId, sheetName, headers: [], rows: [] };
   }
 
   const headers = (rawValues[0] ?? []).map((h) => String(h ?? "").trim());
-  const rows: SheetRow[] = [];
+  console.log(
+    `[google-sheets] sheet="${sheetName}" headers (${headers.length}): ${headers.join(" | ")}`
+  );
 
+  const rows: SheetRow[] = [];
   for (let i = 1; i < rawValues.length; i++) {
     const rawRow = rawValues[i] ?? [];
     const values: string[] = Array.from({ length: headers.length }, (_, j) =>
@@ -101,6 +181,9 @@ export async function readSheet(): Promise<SheetData> {
     rows.push({ rowIndex: i + 1, values });
   }
 
+  console.log(
+    `[google-sheets] sheet="${sheetName}" — data rows (excluding header): ${rows.length}`
+  );
   return { spreadsheetId, sheetName, headers, rows };
 }
 
@@ -117,6 +200,11 @@ export async function writeSheetResults(
   errorMessageColIdx: number
 ): Promise<void> {
   if (entries.length === 0) return;
+
+  console.log(
+    `[google-sheets] writing back ${entries.length} row(s) to sheet="${sheetName}" — ` +
+    `syncStatus col=${syncStatusColIdx} systemOrderId col=${systemOrderIdColIdx} errorMessage col=${errorMessageColIdx}`
+  );
 
   const token = await getAccessToken();
   const quotedName = quoteSheetName(sheetName);
@@ -141,6 +229,9 @@ export async function writeSheetResults(
   const BATCH_SIZE = 500;
   for (let i = 0; i < data.length; i += BATCH_SIZE) {
     const batch = data.slice(i, i + BATCH_SIZE);
+    console.log(
+      `[google-sheets] batch update chunk ${Math.floor(i / BATCH_SIZE) + 1} — ${batch.length} ranges`
+    );
     const res = await fetch(
       `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values:batchUpdate`,
       {
@@ -154,7 +245,13 @@ export async function writeSheetResults(
     );
     if (!res.ok) {
       const body = await res.text();
+      console.error(
+        `[google-sheets] batch update failed — HTTP ${res.status}: ${body.slice(0, 400)}`
+      );
       throw new Error(`فشل تحديث Google Sheets (${res.status}): ${body.slice(0, 200)}`);
     }
+    console.log(`[google-sheets] batch update chunk OK`);
   }
+
+  console.log(`[google-sheets] all write-back chunks completed for sheet="${sheetName}"`);
 }

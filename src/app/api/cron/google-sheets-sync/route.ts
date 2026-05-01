@@ -17,19 +17,16 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "غير مصرح" }, { status: 401 });
     }
   } else if (process.env.NODE_ENV === "production") {
-    // No secret configured in production — deny all requests
     return NextResponse.json(
       { error: "GOOGLE_SHEETS_SYNC_SECRET غير مكوّن — الطلب مرفوض في بيئة الإنتاج" },
       { status: 401 }
     );
   }
 
-  // Check required env vars
   const missingVars = [
     "GOOGLE_SHEETS_CLIENT_EMAIL",
     "GOOGLE_SHEETS_PRIVATE_KEY",
     "GOOGLE_SHEETS_SPREADSHEET_ID",
-    "GOOGLE_SHEETS_SHEET_NAME",
   ].filter((v) => !process.env[v]);
 
   if (missingVars.length > 0) {
@@ -40,7 +37,6 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  // Skip if a sync is already running
   const running = await prisma.googleSheetSyncRun.findFirst({
     where: { status: "RUNNING" },
     orderBy: { startedAt: "desc" },
@@ -52,7 +48,10 @@ export async function GET(request: NextRequest) {
   try {
     const result = await runGoogleSheetsImport("CRON");
     console.log(
-      `[cron/google-sheets-sync] completed — rows:${result.totalRows} imported:${result.importedCount} skipped:${result.skippedCount} failed:${result.failedCount}`
+      `[cron/google-sheets-sync] completed — ` +
+      `sheets:${result.totalSheets} (skipped:${result.sheetsSkipped}) ` +
+      `rows:${result.totalRows} imported:${result.importedCount} ` +
+      `duplicates:${result.duplicateCount} skipped:${result.skippedCount} failed:${result.failedCount}`
     );
     return NextResponse.json({ data: result });
   } catch (err) {

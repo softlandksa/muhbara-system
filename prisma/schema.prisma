@@ -442,9 +442,12 @@ model GoogleSheetSyncRun {
   triggeredBy       String
   triggeredByUserId String?
   status            String
+  totalSheets       Int       @default(0)
+  sheetsSkipped     Int       @default(0)
   totalRows         Int       @default(0)
   importedCount     Int       @default(0)
   skippedCount      Int       @default(0)
+  duplicateCount    Int       @default(0)
   failedCount       Int       @default(0)
   errorSummary      String?
   createdAt         DateTime  @default(now())

@@ -55,14 +55,11 @@ const REQUIRED: EnvVar[] = [
   },
   {
     name: "GOOGLE_SHEETS_SPREADSHEET_ID",
-    description: "The ID of the Google Sheet to import orders from",
+    description: "The ID of the Google Spreadsheet workbook to import orders from",
     prodOnly: true,
   },
-  {
-    name: "GOOGLE_SHEETS_SHEET_NAME",
-    description: "The tab name inside the Google Sheet (e.g. Sheet1)",
-    prodOnly: true,
-  },
+  // GOOGLE_SHEETS_SHEET_NAME is no longer used — all tabs are discovered automatically.
+  // GOOGLE_SHEETS_RANGE is optional: column range only, e.g. "A:T" (not "Sheet1!A:T").
   {
     name: "GOOGLE_SHEETS_SYNC_SECRET",
     description: "Secret token to protect /api/cron/google-sheets-sync (required in production)",

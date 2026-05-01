@@ -39,13 +39,32 @@ type LastSyncInfo = {
   id: string;
   finishedAt: string;
   status: string;
+  totalSheets: number;
+  sheetsSkipped: number;
   totalRows: number;
   importedCount: number;
   skippedCount: number;
+  duplicateCount: number;
   failedCount: number;
   triggeredBy: string;
   errorSummary: string | null;
 } | null;
+
+type SyncResultData = {
+  totalSheets: number;
+  sheetsSkipped: number;
+  totalRows: number;
+  importedCount: number;
+  skippedCount: number;
+  duplicateCount: number;
+  failedCount: number;
+};
+
+type SyncResponse = {
+  data?: SyncResultData;
+  error?: string;
+  debug?: string;
+};
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
@@ -72,26 +91,42 @@ export function GoogleSheetSyncButton({
     setSyncing(true);
     try {
       const res = await fetch("/api/google-sheets/sync", { method: "POST" });
-      const json = (await res.json()) as {
-        data?: { totalRows: number; importedCount: number; skippedCount: number; failedCount: number };
-        error?: string;
-      };
+      const json = (await res.json()) as SyncResponse;
 
       if (!res.ok) {
-        toast.error(json.error ?? "فشل التحديث");
+        const errMsg = json.error ?? "فشل التحديث";
+        if (json.debug) console.error("[GoogleSheetSync] server debug:", json.debug);
+        toast.error(errMsg);
         return;
       }
 
       if (json.data) {
-        const { importedCount, skippedCount, failedCount, totalRows } = json.data;
-        toast.success(
-          `إجمالي الصفوف: ${totalRows} — مستورد: ${importedCount} · متخطى: ${skippedCount} · فاشل: ${failedCount}`
-        );
+        const {
+          totalSheets, sheetsSkipped, totalRows,
+          importedCount, skippedCount, duplicateCount, failedCount,
+        } = json.data;
+
+        const parts: string[] = [
+          `أوراق: ${totalSheets}${sheetsSkipped > 0 ? ` (متخطى: ${sheetsSkipped})` : ""}`,
+          `صفوف: ${totalRows}`,
+          `مستورد: ${importedCount}`,
+        ];
+        if (duplicateCount > 0) parts.push(`عملاء مكررين: ${duplicateCount}`);
+        if (skippedCount > 0) parts.push(`متخطى: ${skippedCount}`);
+        if (failedCount > 0) parts.push(`فاشل: ${failedCount}`);
+
+        toast.success("تم تحديث البيانات بنجاح", {
+          description: parts.join(" · "),
+          duration: 7000,
+        });
+      } else {
+        toast.success("تم تحديث البيانات بنجاح");
       }
 
       await queryClient.invalidateQueries({ queryKey: ["google-sheets-last-sync"] });
       onSyncDone?.();
-    } catch {
+    } catch (err) {
+      console.error("[GoogleSheetSync] fetch error:", err);
       toast.error("تعذر الاتصال بالخادم — يرجى المحاولة مرة أخرى");
     } finally {
       setSyncing(false);
@@ -109,11 +144,16 @@ export function GoogleSheetSyncButton({
         title="تحديث البيانات من Google Sheets"
       >
         {syncing ? (
-          <Loader2 className="h-4 w-4 animate-spin ml-1" />
+          <>
+            <Loader2 className="h-4 w-4 animate-spin ml-1" />
+            جاري التحديث...
+          </>
         ) : (
-          <RefreshCw className="h-4 w-4 ml-1" />
+          <>
+            <RefreshCw className="h-4 w-4 ml-1" />
+            تحديث البيانات
+          </>
         )}
-        تحديث البيانات
       </Button>
 
       <span className="text-xs text-muted-foreground hidden md:block whitespace-nowrap">

@@ -71,7 +71,8 @@
       "Bash(findstr -v node_modules)",
       "Bash(dir /s /b middleware.ts middleware.js)",
       "Bash(findstr /v node_modules)",
-      "Bash(findstr /v \".next\")"
+      "Bash(findstr /v \".next\")",
+      "Bash(grep -v \"\\\\\\\\[\")"
     ]
   }
 }

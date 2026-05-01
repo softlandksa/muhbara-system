@@ -26,10 +26,14 @@ function getErrorMessage(code: string | null | undefined): string {
       return "البريد الإلكتروني غير موجود";
     case "invalid_password":
       return "كلمة المرور غير صحيحة";
+    case "hash_missing":
+      return "كلمة المرور غير مهيأة لهذا المستخدم";
     case "database_error":
       return "تعذر الاتصال بقاعدة البيانات";
     case "account_disabled":
       return "الحساب معطّل. تواصل مع المدير";
+    case "auth_error":
+      return "حدث خطأ أثناء التحقق من كلمة المرور";
     case "CredentialsSignin":
       return "البريد الإلكتروني أو كلمة المرور غير صحيحة";
     case "undefined":
@@ -73,11 +77,12 @@ export default function LoginPage() {
       redirect: false,
     });
 
+    console.log("LOGIN_RESULT", JSON.stringify(result));
+
     if (result?.error) {
       toast.error(getErrorMessage(result.error));
     } else {
-      router.push("/");
-      router.refresh();
+      window.location.href = "/dashboard";
     }
   };
 

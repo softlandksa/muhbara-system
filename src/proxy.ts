@@ -21,6 +21,8 @@ export default async function proxy(req: NextRequest) {
     secret: process.env.NEXTAUTH_SECRET,
   });
 
+  console.log("MIDDLEWARE_TOKEN_EXISTS", !!token);
+
   const isLoginPage = pathname === "/login";
 
   // Authenticated user on the login page → send to app

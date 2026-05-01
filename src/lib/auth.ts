@@ -20,6 +20,7 @@ export const authOptions: NextAuthOptions = {
         const email = credentials.email.toLowerCase().trim();
         console.log("AUTH_EMAIL", email);
 
+        // ── Database lookup ─────────────────────────────────────────────────
         let user;
         try {
           user = await prisma.user.findUnique({
@@ -35,36 +36,55 @@ export const authOptions: NextAuthOptions = {
             },
           });
         } catch (dbError) {
-          console.error("AUTH_DATABASE_ERROR", dbError);
+          // Log the actual exception so Vercel logs show the real cause.
+          console.error("AUTH_ERROR_REAL", dbError);
           throw new Error("database_error");
         }
 
         console.log("AUTH_USER_FOUND", !!user);
-        console.log("AUTH_HAS_HASH", !!user?.passwordHash);
 
-        if (!user) return null;
+        if (!user) {
+          throw new Error("user_not_found");
+        }
 
         if (!user.isActive) {
           console.log("AUTH_ACCOUNT_DISABLED", email);
           throw new Error("account_disabled");
         }
 
-        if (!user.passwordHash) return null;
+        console.log("AUTH_HAS_PASSWORD_HASH", !!user.passwordHash);
 
-        const isValid = await bcrypt.compare(credentials.password, user.passwordHash);
+        if (!user.passwordHash) {
+          console.error("AUTH_ERROR_REAL hash missing for", email);
+          throw new Error("hash_missing");
+        }
+
+        // ── Password comparison ──────────────────────────────────────────────
+        let isValid: boolean;
+        try {
+          isValid = await bcrypt.compare(credentials.password, user.passwordHash);
+        } catch (bcryptError) {
+          console.error("AUTH_ERROR_REAL bcrypt failed:", bcryptError);
+          throw new Error("auth_error");
+        }
+
         console.log("AUTH_PASSWORD_VALID", isValid);
 
-        if (!isValid) return null;
+        if (!isValid) {
+          throw new Error("invalid_password");
+        }
 
         console.log("AUTH_SUCCESS", email, user.role);
 
-        return {
+        const returnUser = {
           id: user.id,
           name: user.name,
           email: user.email,
           role: user.role,
           teamId: user.teamId,
         };
+        console.log("AUTH_SUCCESS_RETURN_USER", JSON.stringify(returnUser));
+        return returnUser;
       },
     }),
   ],
@@ -72,17 +92,23 @@ export const authOptions: NextAuthOptions = {
     async jwt({ token, user }) {
       if (user) {
         token.id = user.id;
+        token.name = user.name;
+        token.email = user.email;
         const u = user as unknown as { role: Role; teamId: string | null };
         token.role = u.role;
         token.teamId = u.teamId;
+        console.log("AUTH_JWT_CALLBACK_USER", token.id, token.role);
       }
       return token;
     },
     async session({ session, token }) {
       if (token) {
         session.user.id = token.id as string;
+        session.user.name = token.name as string;
+        session.user.email = token.email as string;
         session.user.role = token.role as Role;
         session.user.teamId = token.teamId as string | null;
+        console.log("AUTH_SESSION_CALLBACK_TOKEN", token.id, token.role);
       }
       return session;
     },
@@ -93,7 +119,7 @@ export const authOptions: NextAuthOptions = {
   },
   session: {
     strategy: "jwt",
-    maxAge: 24 * 60 * 60, // 24 hours
+    maxAge: 24 * 60 * 60,
   },
   secret: process.env.NEXTAUTH_SECRET,
 };

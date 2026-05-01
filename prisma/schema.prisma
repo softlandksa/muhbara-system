@@ -44,40 +44,40 @@ model Team {
 }
 
 model Order {
-  id                 String                @id @default(cuid())
-  orderNumber        String                @unique
-  orderDate          DateTime              @default(now())
-  customerName       String
-  phone              String
-  address            String
-  countryId          String
-  currencyId         String
-  paymentMethodId    String
-  totalAmount        Float                 @default(0)
-  notes              String?
-  createdById        String
-  teamId             String?
-  createdAt          DateTime              @default(now())
-  updatedAt          DateTime              @updatedAt
-  deletedAt          DateTime?
+  id                       String                @id @default(cuid())
+  orderNumber              String                @unique
+  orderDate                DateTime              @default(now())
+  customerName             String
+  phone                    String
+  address                  String
+  countryId                String
+  currencyId               String
+  paymentMethodId          String
+  totalAmount              Float                 @default(0)
+  notes                    String?
+  createdById              String
+  teamId                   String?
+  createdAt                DateTime              @default(now())
+  updatedAt                DateTime              @updatedAt
+  deletedAt                DateTime?
   isRepeatCustomer         Boolean               @default(false)
   repeatCustomerNote       String?
   statusId                 String
-  paymentReceiptUrl        String?
   paymentReceiptMime       String?
   paymentReceiptUploadedAt DateTime?
-  followUpNotes      FollowUpNote[]
-  notifications      Notification[]
-  receipts           PaymentReceipt[]
-  country            Country               @relation(fields: [countryId], references: [id])
-  createdBy          User                  @relation("OrderCreator", fields: [createdById], references: [id])
-  currency           Currency              @relation(fields: [currencyId], references: [id])
-  paymentMethod      PaymentMethod         @relation(fields: [paymentMethodId], references: [id])
-  status             ShippingStatusPrimary @relation(fields: [statusId], references: [id])
-  team               Team?                 @relation(fields: [teamId], references: [id])
-  auditLogs          OrderAuditLog[]
-  items              OrderItem[]
-  shippingInfo       ShippingInfo?
+  paymentReceiptUrl        String?
+  followUpNotes            FollowUpNote[]
+  notifications            Notification[]
+  country                  Country               @relation(fields: [countryId], references: [id])
+  createdBy                User                  @relation("OrderCreator", fields: [createdById], references: [id])
+  currency                 Currency              @relation(fields: [currencyId], references: [id])
+  paymentMethod            PaymentMethod         @relation(fields: [paymentMethodId], references: [id])
+  status                   ShippingStatusPrimary @relation(fields: [statusId], references: [id])
+  team                     Team?                 @relation(fields: [teamId], references: [id])
+  auditLogs                OrderAuditLog[]
+  items                    OrderItem[]
+  receipts                 PaymentReceipt[]
+  shippingInfo             ShippingInfo?
 
   @@index([deletedAt])
   @@index([statusId])
@@ -322,13 +322,13 @@ model Commission {
   periodStart          DateTime
   periodEnd            DateTime
   totalDeliveredOrders Int
-  ruleId               String?          // nullable: piecewise calculation spans multiple brackets
-  breakdown            Json?            // BracketBreakdown[] snapshot for audit
+  ruleId               String?
   commissionAmount     Float
   currencyId           String
   status               CommissionStatus @default(PENDING)
   calculatedAt         DateTime         @default(now())
   approvedById         String?
+  breakdown            Json?
   approvedBy           User?            @relation("CommissionApprover", fields: [approvedById], references: [id])
   currency             Currency         @relation(fields: [currencyId], references: [id])
   rule                 CommissionRule?  @relation(fields: [ruleId], references: [id])
@@ -372,35 +372,6 @@ model ActivityLog {
   @@index([entityType])
   @@index([createdAt])
   @@index([entityType, createdAt])
-}
-
-enum Role {
-  ADMIN
-  SALES_MANAGER
-  SALES
-  SHIPPING
-  FOLLOWUP
-  GENERAL_MANAGER
-  SUPPORT
-  HR
-}
-
-enum CommissionType {
-  FIXED
-  PERCENTAGE
-}
-
-enum CommissionStatus {
-  PENDING
-  APPROVED
-  PAID
-}
-
-enum NotificationType {
-  ORDER_STATUS
-  NEW_REPORT
-  COMMISSION
-  SYSTEM
 }
 
 model PaymentReceipt {
@@ -455,4 +426,33 @@ model GoogleSheetSyncRun {
 
   @@index([status])
   @@index([startedAt])
+}
+
+enum Role {
+  ADMIN
+  SALES_MANAGER
+  SALES
+  SHIPPING
+  FOLLOWUP
+  GENERAL_MANAGER
+  SUPPORT
+  HR
+}
+
+enum CommissionType {
+  FIXED
+  PERCENTAGE
+}
+
+enum CommissionStatus {
+  PENDING
+  APPROVED
+  PAID
+}
+
+enum NotificationType {
+  ORDER_STATUS
+  NEW_REPORT
+  COMMISSION
+  SYSTEM
 }

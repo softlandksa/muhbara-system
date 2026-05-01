@@ -14,38 +14,53 @@ export const authOptions: NextAuthOptions = {
       },
       async authorize(credentials) {
         if (!credentials?.email || !credentials?.password) {
-          throw new Error("البريد الإلكتروني وكلمة المرور مطلوبان");
+          return null;
         }
 
-        const user = await prisma.user.findUnique({
-          where: { email: credentials.email },
-          select: {
-            id: true,
-            name: true,
-            email: true,
-            passwordHash: true,
-            role: true,
-            teamId: true,
-            isActive: true,
-          },
-        });
+        const email = credentials.email.toLowerCase().trim();
+        console.log("[AUTH] Login attempt:", email);
+
+        let user;
+        try {
+          user = await prisma.user.findUnique({
+            where: { email },
+            select: {
+              id: true,
+              name: true,
+              email: true,
+              passwordHash: true,
+              role: true,
+              teamId: true,
+              isActive: true,
+            },
+          });
+        } catch (dbError) {
+          console.error("[AUTH] AUTH_DATABASE_ERROR:", dbError);
+          throw new Error("database_error");
+        }
 
         if (!user) {
-          throw new Error("البريد الإلكتروني أو كلمة المرور غير صحيحة");
+          console.log("[AUTH] AUTH_USER_NOT_FOUND:", email);
+          return null;
         }
 
         if (!user.isActive) {
-          throw new Error("الحساب معطّل. تواصل مع المدير");
+          console.log("[AUTH] AUTH_ACCOUNT_DISABLED:", email);
+          throw new Error("account_disabled");
         }
 
-        const isValidPassword = await bcrypt.compare(
-          credentials.password,
-          user.passwordHash
-        );
-
-        if (!isValidPassword) {
-          throw new Error("البريد الإلكتروني أو كلمة المرور غير صحيحة");
+        if (!user.passwordHash) {
+          console.error("[AUTH] AUTH_PASSWORD_HASH_MISSING:", email);
+          return null;
         }
+
+        const isValid = await bcrypt.compare(credentials.password, user.passwordHash);
+        if (!isValid) {
+          console.log("[AUTH] AUTH_INVALID_PASSWORD:", email);
+          return null;
+        }
+
+        console.log("[AUTH] AUTH_SUCCESS:", email, "role:", user.role);
 
         return {
           id: user.id,

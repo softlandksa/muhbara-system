@@ -18,7 +18,7 @@ export const authOptions: NextAuthOptions = {
         }
 
         const email = credentials.email.toLowerCase().trim();
-        console.log("[AUTH] Login attempt:", email);
+        console.log("AUTH_EMAIL", email);
 
         let user;
         try {
@@ -35,32 +35,28 @@ export const authOptions: NextAuthOptions = {
             },
           });
         } catch (dbError) {
-          console.error("[AUTH] AUTH_DATABASE_ERROR:", dbError);
+          console.error("AUTH_DATABASE_ERROR", dbError);
           throw new Error("database_error");
         }
 
-        if (!user) {
-          console.log("[AUTH] AUTH_USER_NOT_FOUND:", email);
-          return null;
-        }
+        console.log("AUTH_USER_FOUND", !!user);
+        console.log("AUTH_HAS_HASH", !!user?.passwordHash);
+
+        if (!user) return null;
 
         if (!user.isActive) {
-          console.log("[AUTH] AUTH_ACCOUNT_DISABLED:", email);
+          console.log("AUTH_ACCOUNT_DISABLED", email);
           throw new Error("account_disabled");
         }
 
-        if (!user.passwordHash) {
-          console.error("[AUTH] AUTH_PASSWORD_HASH_MISSING:", email);
-          return null;
-        }
+        if (!user.passwordHash) return null;
 
         const isValid = await bcrypt.compare(credentials.password, user.passwordHash);
-        if (!isValid) {
-          console.log("[AUTH] AUTH_INVALID_PASSWORD:", email);
-          return null;
-        }
+        console.log("AUTH_PASSWORD_VALID", isValid);
 
-        console.log("[AUTH] AUTH_SUCCESS:", email, "role:", user.role);
+        if (!isValid) return null;
+
+        console.log("AUTH_SUCCESS", email, user.role);
 
         return {
           id: user.id,

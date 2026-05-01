@@ -148,6 +148,110 @@ After a successful deploy, ask an employee to verify each scenario:
 
 ---
 
+---
+
+## Google Sheets automatic order import
+
+### Required environment variables
+
+| Variable | Description | Required |
+|---|---|---|
+| `GOOGLE_SHEETS_CLIENT_EMAIL` | Service account email from Google Cloud | Yes |
+| `GOOGLE_SHEETS_PRIVATE_KEY` | Private key from the service account JSON (keep `\n` escapes) | Yes |
+| `GOOGLE_SHEETS_SPREADSHEET_ID` | The spreadsheet ID from the sheet URL | Yes |
+| `GOOGLE_SHEETS_SHEET_NAME` | The exact tab name inside the spreadsheet | Yes |
+| `GOOGLE_SHEETS_RANGE` | Override read range, e.g. `Sheet1!A:Z` (optional, defaults to `SheetName!A:Z`) | No |
+| `GOOGLE_SHEETS_SYNC_SECRET` | Secret token to protect the cron endpoint | Yes (production) |
+
+### Google Cloud setup
+
+1. Go to [console.cloud.google.com](https://console.cloud.google.com) and create (or select) a project.
+2. Enable the **Google Sheets API**: APIs & Services → Library → search "Google Sheets API" → Enable.
+3. Create a service account: IAM & Admin → Service Accounts → Create Service Account.
+   - Give it any name (e.g. `sheets-importer`).
+   - No special IAM roles needed.
+4. Generate a JSON key: click the service account → Keys → Add Key → JSON → Download.
+5. From the JSON file, copy:
+   - `client_email` → `GOOGLE_SHEETS_CLIENT_EMAIL`
+   - `private_key` → `GOOGLE_SHEETS_PRIVATE_KEY` (the full `-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n` string)
+
+### Share the spreadsheet with the service account
+
+Open the Google Sheet → Share → paste the `GOOGLE_SHEETS_CLIENT_EMAIL` value → **Editor** role → Share.
+
+### Sheet column template
+
+The sheet must have a header row with **exactly** these column names (case-sensitive):
+
+| Column | Required | Notes |
+|---|---|---|
+| External Order ID | Yes | Unique key — never duplicated |
+| Order Date | Yes | ISO `YYYY-MM-DD`, `DD/MM/YYYY`, or Excel serial |
+| Customer Name | Yes | |
+| Phone | Yes | |
+| Country | Yes | Must match a country name/code in the system |
+| City | No | Combined with Detailed Address |
+| Detailed Address | No | |
+| Product | Yes | Must match a product name or SKU in the system |
+| Quantity | Yes | Positive integer |
+| Paid Amount | Yes | Non-negative decimal |
+| Currency | Yes | Must match currency name or ISO code (e.g. SAR, USD) |
+| Payment Method | Yes | Must match a payment method name in the system |
+| Receipt URL 1 | No | Must be an http/https URL |
+| Receipt URL 2 | No | |
+| Receipt URL 3 | No | |
+| Notes | No | |
+| Employee Email | Yes | Must match an active user's email |
+| Sync Status | Yes | System-written: empty → Synced / Failed |
+| System Order ID | Yes | System-written: filled with the order number |
+| Error Message | Yes | System-written: filled on failure |
+
+> **Sync Status**, **System Order ID**, and **Error Message** must exist as columns even if empty — the system writes back to these columns after each sync.
+
+### Setting GOOGLE_SHEETS_PRIVATE_KEY in Vercel
+
+The private key contains literal `\n` newlines. In Vercel Dashboard → Settings → Environment Variables, paste the raw multi-line private key directly into the value field (Vercel stores it correctly). Do **not** manually add `\n` — Vercel handles multiline values.
+
+If setting via `.env.local`, keep the `\n` literal escapes:
+```
+GOOGLE_SHEETS_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\nMIIEv....\n-----END PRIVATE KEY-----\n"
+```
+
+### Vercel Cron setup (every 12 hours)
+
+The `vercel.json` at the project root configures the cron:
+```json
+{
+  "crons": [{ "path": "/api/cron/google-sheets-sync", "schedule": "0 */12 * * *" }]
+}
+```
+
+Vercel automatically sets `CRON_SECRET` and sends it as `Authorization: Bearer <secret>` to the cron endpoint. Set `GOOGLE_SHEETS_SYNC_SECRET` to the same value in your environment variables, or rely on Vercel's built-in `CRON_SECRET`.
+
+To add `GOOGLE_SHEETS_SYNC_SECRET`:
+```bash
+openssl rand -hex 32
+# Paste the output into Vercel → Environment Variables → GOOGLE_SHEETS_SYNC_SECRET
+```
+
+### Manual sync
+
+Roles that can trigger manual sync: **مدير النظام** (ADMIN), **مدير عام** (GENERAL_MANAGER), **موظف شحن** (SHIPPING).
+
+The "تحديث البيانات" button appears at the top of the Orders page for these roles. Clicking it triggers the same import process as the cron job. The last sync time is shown next to the button.
+
+### Database schema update
+
+After pulling this update, push the new models to the database:
+```bash
+npx prisma db push
+npx prisma generate
+```
+
+This adds `GoogleSheetImportLog` and `GoogleSheetSyncRun` tables (additive only — no data loss).
+
+---
+
 ## Local development without Vercel Blob
 
 Omit `BLOB_READ_WRITE_TOKEN` from `.env`. The app automatically falls back to local

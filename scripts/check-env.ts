@@ -42,6 +42,32 @@ const REQUIRED: EnvVar[] = [
       "Vercel Blob token — Vercel Dashboard → Storage → Blob → .env.local",
     prodOnly: true,
   },
+  // Google Sheets integration (optional feature — only warn in production if partially set)
+  {
+    name: "GOOGLE_SHEETS_CLIENT_EMAIL",
+    description: "Google service account email for Sheets API (see DEPLOYMENT.md)",
+    prodOnly: true,
+  },
+  {
+    name: "GOOGLE_SHEETS_PRIVATE_KEY",
+    description: "Google service account private key for Sheets API (see DEPLOYMENT.md)",
+    prodOnly: true,
+  },
+  {
+    name: "GOOGLE_SHEETS_SPREADSHEET_ID",
+    description: "The ID of the Google Sheet to import orders from",
+    prodOnly: true,
+  },
+  {
+    name: "GOOGLE_SHEETS_SHEET_NAME",
+    description: "The tab name inside the Google Sheet (e.g. Sheet1)",
+    prodOnly: true,
+  },
+  {
+    name: "GOOGLE_SHEETS_SYNC_SECRET",
+    description: "Secret token to protect /api/cron/google-sheets-sync (required in production)",
+    prodOnly: true,
+  },
 ];
 
 const PASS = "  ✓";

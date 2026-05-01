@@ -39,6 +39,7 @@ import { cn } from "@/lib/utils";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { SearchableSelect } from "@/components/shared/SearchableSelect";
 import { AppLoadingOverlay } from "@/components/shared/AppLoadingOverlay";
+import { GoogleSheetSyncButton } from "@/components/shared/GoogleSheetSyncButton";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -1028,6 +1029,11 @@ function OrdersPageInner({ setImportOpen }: { setImportOpen: (open: boolean) => 
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">الطلبات</h1>
         <div className="flex items-center gap-2">
+          {(role === "ADMIN" || role === "GENERAL_MANAGER" || role === "SHIPPING") && (
+            <GoogleSheetSyncButton
+              onSyncDone={() => queryClient.invalidateQueries({ queryKey: ["orders"] })}
+            />
+          )}
           {(role === "ADMIN" || role === "GENERAL_MANAGER" || role === "SALES_MANAGER" || role === "SALES") && (
             <Button variant="outline" size="sm" onClick={() => handleExportFiltered()} disabled={exportLoading}>
               {exportLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}

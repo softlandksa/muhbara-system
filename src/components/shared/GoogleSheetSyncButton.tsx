@@ -2,11 +2,11 @@
 
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { RefreshCw, Loader2 } from "lucide-react";
+import { RefreshCw, Loader2, Clock } from "lucide-react";
 import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
-// ─── Arabic date formatting ───────────────────────────────────────────────────
+// ─── Arabic date helpers ──────────────────────────────────────────────────────
 
 const ARABIC_MONTHS = [
   "يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو",
@@ -19,7 +19,9 @@ function formatRelative(date: Date): string {
   const diffMin = Math.floor(diffSec / 60);
   if (diffMin < 60) return diffMin === 1 ? "منذ دقيقة" : `منذ ${diffMin} دقيقة`;
   const diffHour = Math.floor(diffMin / 60);
-  return diffHour === 1 ? "منذ ساعة" : `منذ ${diffHour} ساعات`;
+  if (diffHour < 24) return diffHour === 1 ? "منذ ساعة" : `منذ ${diffHour} ساعات`;
+  const diffDay = Math.floor(diffHour / 24);
+  return diffDay === 1 ? "منذ يوم" : `منذ ${diffDay} أيام`;
 }
 
 function formatExact(date: Date): string {
@@ -30,7 +32,7 @@ function formatExact(date: Date): string {
   const min = String(date.getMinutes()).padStart(2, "0");
   const h12 = h24 % 12 || 12;
   const ampm = h24 >= 12 ? "م" : "ص";
-  return `${d}-${m}-${y} ${h12}:${min} ${ampm}`;
+  return `${d} ${m} ${y} — ${h12}:${min} ${ampm}`;
 }
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -94,9 +96,8 @@ export function GoogleSheetSyncButton({
       const json = (await res.json()) as SyncResponse;
 
       if (!res.ok) {
-        const errMsg = json.error ?? "فشل التحديث";
         if (json.debug) console.error("[GoogleSheetSync] server debug:", json.debug);
-        toast.error(errMsg);
+        toast.error(json.error ?? "فشل التحديث");
         return;
       }
 
@@ -112,8 +113,8 @@ export function GoogleSheetSyncButton({
           `مستورد: ${importedCount}`,
         ];
         if (duplicateCount > 0) parts.push(`عملاء مكررين: ${duplicateCount}`);
-        if (skippedCount > 0) parts.push(`متخطى: ${skippedCount}`);
-        if (failedCount > 0) parts.push(`فاشل: ${failedCount}`);
+        if (skippedCount > 0)   parts.push(`متخطى: ${skippedCount}`);
+        if (failedCount > 0)    parts.push(`فاشل: ${failedCount}`);
 
         toast.success("تم تحديث البيانات بنجاح", {
           description: parts.join(" · "),
@@ -134,33 +135,58 @@ export function GoogleSheetSyncButton({
   }
 
   return (
-    <div className="flex items-center gap-2">
-      <Button
+    <div className="flex items-center gap-3">
+      {/* ── Gradient sync button ───────────────────────────────────────────── */}
+      <button
         type="button"
-        variant="outline"
-        size="sm"
         onClick={handleSync}
         disabled={syncing}
+        className={cn(
+          // layout
+          "relative inline-flex items-center gap-2 px-4 py-2 rounded-xl",
+          // typography
+          "text-sm font-semibold text-white",
+          // gradient (blue-600 → violet-600, left-to-right visually)
+          "bg-gradient-to-r from-blue-600 to-violet-600",
+          // shadow
+          "shadow-md shadow-blue-500/30",
+          // hover
+          "hover:shadow-lg hover:shadow-violet-500/40 hover:scale-105",
+          // active feedback
+          "active:scale-[0.98]",
+          // smooth
+          "transition-all duration-200 ease-out",
+          // disabled
+          "disabled:opacity-60 disabled:cursor-not-allowed",
+          "disabled:hover:scale-100 disabled:hover:shadow-md disabled:hover:shadow-blue-500/30"
+        )}
         title="تحديث البيانات من Google Sheets"
       >
         {syncing ? (
-          <>
-            <Loader2 className="h-4 w-4 animate-spin ml-1" />
-            جاري التحديث...
-          </>
+          <Loader2 className="h-4 w-4 animate-spin shrink-0" />
         ) : (
-          <>
-            <RefreshCw className="h-4 w-4 ml-1" />
-            تحديث البيانات
-          </>
+          <RefreshCw className="h-4 w-4 shrink-0" />
         )}
-      </Button>
+        <span>{syncing ? "جاري التحديث..." : "تحديث البيانات"}</span>
+      </button>
 
-      <span className="text-xs text-muted-foreground hidden md:block whitespace-nowrap">
-        {finishedAt
-          ? `آخر تحديث: ${formatRelative(finishedAt)} — ${formatExact(finishedAt)}`
-          : "لم يتم التحديث بعد"}
-      </span>
+      {/* ── Last sync timestamp ────────────────────────────────────────────── */}
+      {finishedAt && (
+        <div className="hidden md:flex flex-col items-start leading-tight">
+          <span className="flex items-center gap-1 text-xs font-medium text-muted-foreground">
+            <Clock className="h-3 w-3 shrink-0" />
+            {formatRelative(finishedAt)}
+          </span>
+          <span className="text-[10px] text-muted-foreground/70 mt-0.5">
+            {formatExact(finishedAt)}
+          </span>
+          {last?.status === "FAILED" && (
+            <span className="text-[10px] font-medium text-red-500 mt-0.5">
+              فشلت المزامنة الأخيرة
+            </span>
+          )}
+        </div>
+      )}
     </div>
   );
 }

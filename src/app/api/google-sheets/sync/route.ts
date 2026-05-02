@@ -11,6 +11,8 @@ const REQUIRED_ENV_VARS = [
   "GOOGLE_SHEETS_CLIENT_EMAIL",
   "GOOGLE_SHEETS_PRIVATE_KEY",
   "GOOGLE_SHEETS_SPREADSHEET_ID",
+  "GOOGLE_SHEETS_RANGE",
+  "GOOGLE_SHEETS_SYNC_SECRET",
 ] as const;
 
 function getMissingEnvVars(): string[] {
@@ -30,6 +32,13 @@ export async function POST() {
   }
 
   // ── Env var check ───────────────────────────────────────────────────────────
+  console.log("[google-sheets/sync] ENV RUNTIME CHECK", {
+    hasClientEmail: !!process.env.GOOGLE_SHEETS_CLIENT_EMAIL,
+    hasPrivateKey: !!process.env.GOOGLE_SHEETS_PRIVATE_KEY,
+    hasSpreadsheetId: !!process.env.GOOGLE_SHEETS_SPREADSHEET_ID,
+    hasRange: !!process.env.GOOGLE_SHEETS_RANGE,
+    hasSyncSecret: !!process.env.GOOGLE_SHEETS_SYNC_SECRET,
+  });
   const missing = getMissingEnvVars();
   if (missing.length > 0) {
     console.error(

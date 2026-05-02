@@ -6,6 +6,10 @@ let _cachedToken: { value: string; expiresAt: number } | null = null;
 function createAuth(): JWT {
   const clientEmail = process.env.GOOGLE_SHEETS_CLIENT_EMAIL;
   const rawKey = process.env.GOOGLE_SHEETS_PRIVATE_KEY;
+  console.log("[google-sheets] createAuth ENV CHECK", {
+    hasClientEmail: !!clientEmail,
+    hasPrivateKey: !!rawKey,
+  });
   if (!clientEmail || !rawKey) {
     throw new Error(
       "إعدادات Google Sheets غير مكتملة: GOOGLE_SHEETS_CLIENT_EMAIL أو GOOGLE_SHEETS_PRIVATE_KEY مفقود"

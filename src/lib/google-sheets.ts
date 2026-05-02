@@ -16,11 +16,9 @@ function createAuth(): JWT {
     );
   }
 
-  // Strip surrounding quotes added by some secret managers, unescape \n, trim whitespace
-  const privateKey = rawKey
-    .replace(/^"|"$/g, "")
-    .replace(/\\n/g, "\n")
-    .trim();
+  const privateKey = (process.env.GOOGLE_SHEETS_PRIVATE_KEY
+    ?.replace(/\\n/g, "\n")
+    .trim()) ?? "";
 
   const hasBegin = privateKey.includes("-----BEGIN PRIVATE KEY-----");
   const hasEnd   = privateKey.includes("-----END PRIVATE KEY-----");

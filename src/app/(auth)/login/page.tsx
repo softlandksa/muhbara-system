@@ -79,10 +79,10 @@ export default function LoginPage() {
 
     console.log("LOGIN_RESULT", JSON.stringify(result));
 
-    if (result?.error) {
-      toast.error(getErrorMessage(result.error));
+    if (result?.ok) {
+      router.replace("/");
     } else {
-      window.location.href = "/dashboard";
+      toast.error(getErrorMessage(result?.error));
     }
   };
 

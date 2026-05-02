@@ -74,8 +74,6 @@ export const authOptions: NextAuthOptions = {
           throw new Error("invalid_password");
         }
 
-        console.log("AUTH_SUCCESS", email, user.role);
-
         const returnUser = {
           id: user.id,
           name: user.name,
@@ -83,7 +81,7 @@ export const authOptions: NextAuthOptions = {
           role: user.role,
           teamId: user.teamId,
         };
-        console.log("AUTH_SUCCESS_RETURN_USER", JSON.stringify(returnUser));
+        console.log("AUTH_AUTHORIZE_SUCCESS", email, user.role, JSON.stringify(returnUser));
         return returnUser;
       },
     }),
@@ -97,7 +95,7 @@ export const authOptions: NextAuthOptions = {
         const u = user as unknown as { role: Role; teamId: string | null };
         token.role = u.role;
         token.teamId = u.teamId;
-        console.log("AUTH_JWT_CALLBACK_USER", token.id, token.role);
+        console.log("AUTH_JWT_CALLBACK", token.id, token.role);
       }
       return token;
     },
@@ -108,7 +106,7 @@ export const authOptions: NextAuthOptions = {
         session.user.email = token.email as string;
         session.user.role = token.role as Role;
         session.user.teamId = token.teamId as string | null;
-        console.log("AUTH_SESSION_CALLBACK_TOKEN", token.id, token.role);
+        console.log("AUTH_SESSION_CALLBACK", token.id, token.role);
       }
       return session;
     },

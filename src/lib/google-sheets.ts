@@ -15,9 +15,30 @@ function createAuth(): JWT {
       "إعدادات Google Sheets غير مكتملة: GOOGLE_SHEETS_CLIENT_EMAIL أو GOOGLE_SHEETS_PRIVATE_KEY مفقود"
     );
   }
+
+  // Support both actual newlines and escaped \n (Vercel stores secrets with \n)
+  const privateKey = rawKey.replace(/\\n/g, "\n");
+
+  const keyIsValid =
+    privateKey.includes("-----BEGIN PRIVATE KEY-----") ||
+    privateKey.includes("-----BEGIN RSA PRIVATE KEY-----");
+
+  console.log("GOOGLE_SYNC_PRIVATE_KEY_FORMAT_OK", keyIsValid, {
+    length: privateKey.length,
+    hasBeginMarker: privateKey.includes("-----BEGIN"),
+    hasEndMarker: privateKey.includes("-----END"),
+  });
+
+  if (!keyIsValid) {
+    throw new Error(
+      "PRIVATE_KEY_FORMAT_ERROR: تنسيق GOOGLE_SHEETS_PRIVATE_KEY غير صحيح — يجب أن يبدأ بـ -----BEGIN PRIVATE KEY-----"
+    );
+  }
+
+  console.log("GOOGLE_SYNC_CLIENT_INIT_OK");
   return new JWT({
     email: clientEmail,
-    key: rawKey.replace(/\\n/g, "\n"),
+    key: privateKey,
     scopes: ["https://www.googleapis.com/auth/spreadsheets"],
   });
 }
@@ -115,7 +136,7 @@ export async function listSheets(spreadsheetId: string): Promise<string[]> {
     .map((s) => s.properties?.title ?? "")
     .filter(Boolean);
 
-  console.log(`[google-sheets] found ${names.length} sheet(s): ${names.join(", ")}`);
+  console.log("GOOGLE_SYNC_SHEETS_LIST_OK", names.length, names.join(", "));
   return names;
 }
 

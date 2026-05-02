@@ -22,6 +22,8 @@ function getMissingEnvVars(): string[] {
 export async function POST() {
   const isDev = process.env.NODE_ENV !== "production";
 
+  console.log("GOOGLE_SYNC_ROUTE_HIT");
+
   // ── Auth ────────────────────────────────────────────────────────────────────
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: "غير مصرح" }, { status: 401 });
@@ -32,30 +34,28 @@ export async function POST() {
   }
 
   // ── Env var check ───────────────────────────────────────────────────────────
-  console.log("[google-sheets/sync] ENV RUNTIME CHECK", {
+  console.log("GOOGLE_SYNC_ENV_RUNTIME_CHECK", {
     hasClientEmail: !!process.env.GOOGLE_SHEETS_CLIENT_EMAIL,
     hasPrivateKey: !!process.env.GOOGLE_SHEETS_PRIVATE_KEY,
     hasSpreadsheetId: !!process.env.GOOGLE_SHEETS_SPREADSHEET_ID,
     hasRange: !!process.env.GOOGLE_SHEETS_RANGE,
     hasSyncSecret: !!process.env.GOOGLE_SHEETS_SYNC_SECRET,
   });
+
   const missing = getMissingEnvVars();
   if (missing.length > 0) {
-    console.error(
-      `[POST /api/google-sheets/sync] Missing env vars: ${missing.join(", ")}`
-    );
+    console.error("GOOGLE_SYNC_MISSING_ENV_VARS", missing.join(", "));
     return NextResponse.json(
       {
-        error: "إعدادات Google Sheets غير مكتملة. يرجى مراجعة مدير النظام.",
-        ...(isDev && { debug: `Missing env vars: ${missing.join(", ")}` }),
+        success: false,
+        code: "MISSING_ENV_VARS",
+        error: `إعدادات Google Sheets غير مكتملة: ${missing.join(", ")}`,
       },
       { status: 503 }
     );
   }
 
-  console.log(
-    `[POST /api/google-sheets/sync] triggered by ${userId} (${role}) — env vars present: ${REQUIRED_ENV_VARS.join(", ")}`
-  );
+  console.log("GOOGLE_SYNC_ENV_OK", `triggered by ${userId} (${role})`);
 
   // ── Prevent concurrent syncs ─────────────────────────────────────────────────
   const running = await prisma.googleSheetSyncRun.findFirst({
@@ -64,7 +64,7 @@ export async function POST() {
   });
   if (running) {
     console.log(
-      `[POST /api/google-sheets/sync] sync already running (id: ${running.id}, started: ${running.startedAt.toISOString()})`
+      `GOOGLE_SYNC_ALREADY_RUNNING id=${running.id} started=${running.startedAt.toISOString()}`
     );
     return NextResponse.json(
       { error: "عملية المزامنة قيد التشغيل بالفعل — يرجى الانتظار" },
@@ -76,52 +76,81 @@ export async function POST() {
   try {
     const result = await runGoogleSheetsImport("MANUAL", userId);
     console.log(
-      `[POST /api/google-sheets/sync] completed — ` +
-      `sheets:${result.totalSheets} (skipped:${result.sheetsSkipped}) ` +
+      `GOOGLE_SYNC_COMPLETED sheets:${result.totalSheets} skipped:${result.sheetsSkipped} ` +
       `rows:${result.totalRows} imported:${result.importedCount} ` +
-      `duplicates:${result.duplicateCount} skipped:${result.skippedCount} failed:${result.failedCount}`
+      `duplicates:${result.duplicateCount} skippedRows:${result.skippedCount} failed:${result.failedCount}`
     );
-    return NextResponse.json({ data: result });
+    return NextResponse.json({ success: true, data: result });
   } catch (err) {
+    const name    = err instanceof Error ? err.name    : "UnknownError";
     const message = err instanceof Error ? err.message : String(err);
-    const stack = err instanceof Error ? err.stack : undefined;
+    const stack   = err instanceof Error ? err.stack   : undefined;
 
-    console.error("[POST /api/google-sheets/sync] error:", message);
-    if (stack) console.error("[POST /api/google-sheets/sync] stack:", stack);
+    // Always log the real error — visible in Vercel logs
+    console.error("GOOGLE_SYNC_ERROR_REAL", { name, message, stack });
 
-    let userMessage = "حدث خطأ أثناء المزامنة. يرجى المحاولة مرة أخرى.";
+    // ── Classify error into actionable codes ─────────────────────────────────
+    // Only "settings incomplete" when env vars are genuinely absent.
+    // Every other failure gets its real reason surfaced to the caller.
+
+    let code       = "GOOGLE_API_ERROR";
+    let userMsg    = message; // default: expose the real error
     let httpStatus = 500;
 
     if (
-      message.includes("إعدادات Google Sheets") ||
-      message.includes("GOOGLE_SHEETS") ||
-      message.includes("client_email") ||
-      message.includes("private_key") ||
-      message.includes("OAuth")
+      message.includes("GOOGLE_SHEETS_CLIENT_EMAIL") ||
+      message.includes("GOOGLE_SHEETS_PRIVATE_KEY") ||
+      message.includes("غير مكتملة")
     ) {
-      userMessage = "إعدادات Google Sheets غير مكتملة. يرجى مراجعة مدير النظام.";
+      // Thrown by createAuth() when env vars are literally missing
+      code       = "MISSING_ENV_VARS";
+      userMsg    = "إعدادات Google Sheets غير مكتملة — تحقق من متغيرات البيئة";
+      httpStatus = 503;
+    } else if (message.includes("PRIVATE_KEY_FORMAT_ERROR")) {
+      code       = "PRIVATE_KEY_FORMAT_ERROR";
+      userMsg    = "تنسيق مفتاح الخدمة غير صحيح — تأكد أن GOOGLE_SHEETS_PRIVATE_KEY يبدأ بـ -----BEGIN PRIVATE KEY-----";
       httpStatus = 503;
     } else if (
-      message.includes("فشل قراءة") ||
-      message.includes("فشل الحصول") ||
-      message.includes("UNAUTHENTICATED") ||
       message.includes("PERMISSION_DENIED") ||
-      message.includes("404")
+      message.includes("does not have permission") ||
+      message.includes("403")
     ) {
-      userMessage = "تعذر قراءة بيانات Google Sheets حالياً. تحقق من صلاحيات الحساب.";
+      code       = "SHEET_PERMISSION_DENIED";
+      userMsg    = "Service account does not have Editor access to this spreadsheet — شارك الجدول مع البريد الإلكتروني للحساب بصلاحية المحرر";
+      httpStatus = 502;
+    } else if (
+      message.includes("404") ||
+      message.includes("Spreadsheet") ||
+      message.includes("not found")
+    ) {
+      code       = "SPREADSHEET_NOT_FOUND";
+      userMsg    = "معرّف جدول البيانات (GOOGLE_SHEETS_SPREADSHEET_ID) غير صحيح أو الجدول محذوف";
+      httpStatus = 502;
+    } else if (
+      message.includes("UNAUTHENTICATED") ||
+      message.includes("401") ||
+      message.includes("invalid_grant") ||
+      message.includes("Invalid JWT")
+    ) {
+      code       = "UNAUTHENTICATED";
+      userMsg    = `فشل التحقق من هوية حساب الخدمة: ${message}`;
       httpStatus = 502;
     } else if (message.includes("أعمدة مطلوبة مفقودة")) {
-      userMessage = message;
+      code       = "MISSING_COLUMNS";
+      userMsg    = message;
       httpStatus = 400;
     } else if (message.includes("جاهز للشحن")) {
-      userMessage = message;
+      code       = "MISSING_STATUS";
+      userMsg    = message;
       httpStatus = 500;
     }
 
     return NextResponse.json(
       {
-        error: userMessage,
-        ...(isDev && { debug: `${message}\n\n${stack ?? ""}`.trim() }),
+        success: false,
+        code,
+        error: userMsg,
+        ...(isDev && { debug: `[${name}] ${message}\n\n${stack ?? ""}`.trim() }),
       },
       { status: httpStatus }
     );

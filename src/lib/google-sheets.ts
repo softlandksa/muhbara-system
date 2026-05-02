@@ -4,43 +4,67 @@ import { JWT } from "google-auth-library";
 let _cachedToken: { value: string; expiresAt: number } | null = null;
 
 function createAuth(): JWT {
-  const clientEmail = process.env.GOOGLE_SHEETS_CLIENT_EMAIL;
-  const rawKey = process.env.GOOGLE_SHEETS_PRIVATE_KEY;
-  console.log("[google-sheets] createAuth ENV CHECK", {
-    hasClientEmail: !!clientEmail,
-    hasPrivateKey: !!rawKey,
-  });
-  if (!clientEmail || !rawKey) {
-    throw new Error(
-      "إعدادات Google Sheets غير مكتملة: GOOGLE_SHEETS_CLIENT_EMAIL أو GOOGLE_SHEETS_PRIVATE_KEY مفقود"
-    );
-  }
+  // ── Resolve credentials: prefer GOOGLE_SERVICE_ACCOUNT_JSON, fall back to
+  // separate GOOGLE_SHEETS_CLIENT_EMAIL + GOOGLE_SHEETS_PRIVATE_KEY vars ──────
+  const serviceAccountJson = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
 
-  const privateKey = (process.env.GOOGLE_SHEETS_PRIVATE_KEY
-    ?.replace(/\\n/g, "\n")
-    .trim()) ?? "";
+  let clientEmail: string | undefined;
+  let privateKey: string;
+
+  if (serviceAccountJson) {
+    let credentials: { client_email?: string; private_key?: string };
+    try {
+      credentials = JSON.parse(serviceAccountJson) as {
+        client_email?: string;
+        private_key?: string;
+      };
+    } catch {
+      throw new Error(
+        "INVALID_SERVICE_ACCOUNT_JSON: فشل تحليل GOOGLE_SERVICE_ACCOUNT_JSON — تأكد أن القيمة JSON صالحة"
+      );
+    }
+
+    credentials.private_key = (credentials.private_key ?? "")
+      .replace(/\\n/g, "\n")
+      .trim();
+
+    clientEmail = credentials.client_email;
+    privateKey  = credentials.private_key;
+  } else {
+    // Fallback to individual env vars
+    clientEmail = process.env.GOOGLE_SHEETS_CLIENT_EMAIL;
+    privateKey  = (process.env.GOOGLE_SHEETS_PRIVATE_KEY ?? "")
+      .replace(/\\n/g, "\n")
+      .trim();
+  }
 
   const hasBegin = privateKey.includes("-----BEGIN PRIVATE KEY-----");
   const hasEnd   = privateKey.includes("-----END PRIVATE KEY-----");
 
-  console.log("GOOGLE_SYNC_PRIVATE_KEY_FORMAT_OK", hasBegin && hasEnd, {
-    length: privateKey.length,
-    hasBeginMarker: hasBegin,
-    hasEndMarker: hasEnd,
+  console.log("GOOGLE_SYNC_AUTH_CHECK", {
+    hasServiceAccountJson:  !!serviceAccountJson,
+    hasClientEmail:         !!clientEmail,
+    privateKeyStartsCorrect: hasBegin,
+    privateKeyEndsCorrect:   hasEnd,
   });
+
+  if (!clientEmail) {
+    throw new Error(
+      "MISSING_CLIENT_EMAIL: client_email غير موجود — تحقق من GOOGLE_SERVICE_ACCOUNT_JSON أو GOOGLE_SHEETS_CLIENT_EMAIL"
+    );
+  }
 
   if (!hasBegin || !hasEnd) {
     throw new Error(
-      "PRIVATE_KEY_FORMAT_ERROR: تنسيق GOOGLE_SHEETS_PRIVATE_KEY غير صحيح — " +
-      `يجب أن يتضمن -----BEGIN PRIVATE KEY----- و -----END PRIVATE KEY----- ` +
-      `(hasBegin=${hasBegin}, hasEnd=${hasEnd})`
+      `PRIVATE_KEY_FORMAT_ERROR: تنسيق المفتاح غير صحيح (hasBegin=${hasBegin}, hasEnd=${hasEnd}) — ` +
+      "تحقق من GOOGLE_SERVICE_ACCOUNT_JSON أو GOOGLE_SHEETS_PRIVATE_KEY"
     );
   }
 
   console.log("GOOGLE_SYNC_CLIENT_INIT_OK");
   return new JWT({
-    email: clientEmail,
-    key: privateKey,
+    email:  clientEmail,
+    key:    privateKey,
     scopes: ["https://www.googleapis.com/auth/spreadsheets"],
   });
 }

@@ -16,22 +16,26 @@ function createAuth(): JWT {
     );
   }
 
-  // Support both actual newlines and escaped \n (Vercel stores secrets with \n)
-  const privateKey = rawKey.replace(/\\n/g, "\n");
+  // Strip surrounding quotes added by some secret managers, unescape \n, trim whitespace
+  const privateKey = rawKey
+    .replace(/^"|"$/g, "")
+    .replace(/\\n/g, "\n")
+    .trim();
 
-  const keyIsValid =
-    privateKey.includes("-----BEGIN PRIVATE KEY-----") ||
-    privateKey.includes("-----BEGIN RSA PRIVATE KEY-----");
+  const hasBegin = privateKey.includes("-----BEGIN PRIVATE KEY-----");
+  const hasEnd   = privateKey.includes("-----END PRIVATE KEY-----");
 
-  console.log("GOOGLE_SYNC_PRIVATE_KEY_FORMAT_OK", keyIsValid, {
+  console.log("GOOGLE_SYNC_PRIVATE_KEY_FORMAT_OK", hasBegin && hasEnd, {
     length: privateKey.length,
-    hasBeginMarker: privateKey.includes("-----BEGIN"),
-    hasEndMarker: privateKey.includes("-----END"),
+    hasBeginMarker: hasBegin,
+    hasEndMarker: hasEnd,
   });
 
-  if (!keyIsValid) {
+  if (!hasBegin || !hasEnd) {
     throw new Error(
-      "PRIVATE_KEY_FORMAT_ERROR: تنسيق GOOGLE_SHEETS_PRIVATE_KEY غير صحيح — يجب أن يبدأ بـ -----BEGIN PRIVATE KEY-----"
+      "PRIVATE_KEY_FORMAT_ERROR: تنسيق GOOGLE_SHEETS_PRIVATE_KEY غير صحيح — " +
+      `يجب أن يتضمن -----BEGIN PRIVATE KEY----- و -----END PRIVATE KEY----- ` +
+      `(hasBegin=${hasBegin}, hasEnd=${hasEnd})`
     );
   }
 

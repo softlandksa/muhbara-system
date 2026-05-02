@@ -72,7 +72,10 @@
       "Bash(dir /s /b middleware.ts middleware.js)",
       "Bash(findstr /v node_modules)",
       "Bash(findstr /v \".next\")",
-      "Bash(grep -v \"\\\\\\\\[\")"
+      "Bash(grep -v \"\\\\\\\\[\")",
+      "Bash(Select-Object Name)",
+      "Bash(dir *)",
+      "Bash(git commit *)"
     ]
   }
 }

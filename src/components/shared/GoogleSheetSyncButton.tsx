@@ -159,13 +159,13 @@ export function GoogleSheetSyncButton({
         className={cn(
           "relative inline-flex items-center gap-2 px-4 py-2 rounded-xl",
           "text-sm font-semibold text-white",
-          "bg-blue-600",
-          "shadow-md shadow-blue-500/30",
-          "hover:bg-blue-700 hover:shadow-lg hover:shadow-blue-500/40 hover:scale-105",
-          "active:scale-[0.97]",
+          "bg-green-700",
+          "shadow-md shadow-green-900/30",
+          "hover:bg-green-600 hover:shadow-lg hover:shadow-green-500/40 hover:scale-[1.06]",
+          "active:scale-[0.96]",
           "transition-all duration-200 ease-out",
           "disabled:opacity-60 disabled:cursor-not-allowed",
-          "disabled:hover:scale-100 disabled:hover:bg-blue-600 disabled:hover:shadow-md disabled:hover:shadow-blue-500/30",
+          "disabled:hover:scale-100 disabled:hover:bg-green-700 disabled:hover:shadow-md disabled:hover:shadow-green-900/30",
         )}
       >
         {syncing ? (
@@ -182,16 +182,17 @@ export function GoogleSheetSyncButton({
           <Tooltip>
             <TooltipTrigger
               dir="rtl"
-              className="hidden md:flex flex-col items-start leading-tight cursor-default select-none bg-transparent border-0 p-0 m-0 text-start"
+              className="hidden md:flex flex-col items-start cursor-default select-none bg-transparent border-0 p-0 m-0 text-start space-y-1"
             >
-              <span className="flex items-center gap-1 text-xs font-medium text-muted-foreground">
+              <span className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
                 <Clock className="h-3 w-3 shrink-0" />
-                {formatRelative(finishedAt)}
-                <span className="text-muted-foreground/50 mx-0.5">•</span>
-                <span>بواسطة: {byLabel}</span>
+                <span>تم التحديث منذ: {formatRelative(finishedAt)}</span>
+              </span>
+              <span className="text-[11px] text-gray-500 pe-0.5">
+                بواسطة: {byLabel}
               </span>
               {last?.status === "FAILED" && (
-                <span className="text-[10px] font-medium text-red-500 mt-0.5">
+                <span className="text-[10px] font-medium text-red-500">
                   فشلت المزامنة الأخيرة
                 </span>
               )}

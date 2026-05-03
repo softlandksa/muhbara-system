@@ -19,6 +19,7 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 import { ShippingStatusDialog } from "@/components/shared/ShippingStatusDialog";
+import { GoogleSheetSyncButton } from "@/components/shared/GoogleSheetSyncButton";
 import { SearchInput } from "@/components/ui/search-input";
 import { normalizePhone, parseMultiPhone } from "@/lib/phone";
 import { cn } from "@/lib/utils";
@@ -545,9 +546,19 @@ export default function ShippingPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">لوحة الشحن</h1>
-        <Button variant="outline" size="sm" onClick={() => refetch()} disabled={isLoading}>
-          <RefreshCw className={cn("h-4 w-4", isLoading && "animate-spin")} />
-        </Button>
+        <div className="flex items-center gap-2">
+          {isAllowed && (
+            <GoogleSheetSyncButton
+              onSyncDone={() => {
+                queryClient.invalidateQueries({ queryKey: ["shipping-all"] });
+                queryClient.invalidateQueries({ queryKey: ["orders"] });
+              }}
+            />
+          )}
+          <Button variant="outline" size="sm" onClick={() => refetch()} disabled={isLoading}>
+            <RefreshCw className={cn("h-4 w-4", isLoading && "animate-spin")} />
+          </Button>
+        </div>
       </div>
 
       {/* Search row */}

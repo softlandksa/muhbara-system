@@ -50,14 +50,14 @@ function createAuth(): JWT {
 
   if (!clientEmail) {
     throw new Error(
-      "MISSING_CLIENT_EMAIL: client_email غير موجود — تحقق من GOOGLE_SERVICE_ACCOUNT_JSON أو GOOGLE_SHEETS_CLIENT_EMAIL"
+      "MISSING_CLIENT_EMAIL: client_email غير موجود — تحقق من GOOGLE_SERVICE_ACCOUNT_JSON"
     );
   }
 
   if (!hasBegin || !hasEnd) {
     throw new Error(
       `PRIVATE_KEY_FORMAT_ERROR: تنسيق المفتاح غير صحيح (hasBegin=${hasBegin}, hasEnd=${hasEnd}) — ` +
-      "تحقق من GOOGLE_SERVICE_ACCOUNT_JSON أو GOOGLE_SHEETS_PRIVATE_KEY"
+      "تحقق من private_key داخل GOOGLE_SERVICE_ACCOUNT_JSON"
     );
   }
 

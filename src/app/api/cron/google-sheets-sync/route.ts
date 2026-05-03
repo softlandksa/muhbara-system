@@ -23,11 +23,16 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const missingVars = [
-    "GOOGLE_SHEETS_CLIENT_EMAIL",
-    "GOOGLE_SHEETS_PRIVATE_KEY",
-    "GOOGLE_SHEETS_SPREADSHEET_ID",
-  ].filter((v) => !process.env[v]);
+  const missingVars: string[] = [];
+  const hasJson  = !!process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
+  const hasEmail = !!process.env.GOOGLE_SHEETS_CLIENT_EMAIL;
+  const hasKey   = !!process.env.GOOGLE_SHEETS_PRIVATE_KEY;
+  if (!hasJson && !(hasEmail && hasKey)) {
+    missingVars.push(
+      !hasEmail && !hasKey ? "GOOGLE_SERVICE_ACCOUNT_JSON" : !hasEmail ? "GOOGLE_SHEETS_CLIENT_EMAIL" : "GOOGLE_SHEETS_PRIVATE_KEY"
+    );
+  }
+  if (!process.env.GOOGLE_SHEETS_SPREADSHEET_ID) missingVars.push("GOOGLE_SHEETS_SPREADSHEET_ID");
 
   if (missingVars.length > 0) {
     console.warn("[cron/google-sheets-sync] Missing env vars:", missingVars);

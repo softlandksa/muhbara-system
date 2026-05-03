@@ -10,13 +10,13 @@ const ALLOWED_ROLES: Role[] = ["ADMIN", "GENERAL_MANAGER", "SHIPPING"];
 function getMissingEnvVars(): string[] {
   const missing: string[] = [];
 
-  // Credentials: GOOGLE_SERVICE_ACCOUNT_JSON is preferred; fallback requires both separate vars
+  // Credentials: GOOGLE_SERVICE_ACCOUNT_JSON is preferred; fall back requires both separate vars
   const hasJson  = !!process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
   const hasEmail = !!process.env.GOOGLE_SHEETS_CLIENT_EMAIL;
   const hasKey   = !!process.env.GOOGLE_SHEETS_PRIVATE_KEY;
   if (!hasJson && !(hasEmail && hasKey)) {
     missing.push(
-      !hasEmail && !hasKey
+      !hasJson && !hasEmail && !hasKey
         ? "GOOGLE_SERVICE_ACCOUNT_JSON"
         : !hasEmail
         ? "GOOGLE_SHEETS_CLIENT_EMAIL"
@@ -48,10 +48,10 @@ export async function POST() {
   // ── Env var check ───────────────────────────────────────────────────────────
   console.log("GOOGLE_SYNC_ENV_RUNTIME_CHECK", {
     hasServiceAccountJson: !!process.env.GOOGLE_SERVICE_ACCOUNT_JSON,
-    hasClientEmail: !!process.env.GOOGLE_SHEETS_CLIENT_EMAIL,
-    hasSpreadsheetId: !!process.env.GOOGLE_SHEETS_SPREADSHEET_ID,
-    hasRange: !!process.env.GOOGLE_SHEETS_RANGE,
-    hasSyncSecret: !!process.env.GOOGLE_SHEETS_SYNC_SECRET,
+    hasClientEmail:        !!process.env.GOOGLE_SHEETS_CLIENT_EMAIL,
+    hasSpreadsheetId:      !!process.env.GOOGLE_SHEETS_SPREADSHEET_ID,
+    hasRange:              !!process.env.GOOGLE_SHEETS_RANGE,
+    hasSyncSecret:         !!process.env.GOOGLE_SHEETS_SYNC_SECRET,
   });
 
   const missing = getMissingEnvVars();
@@ -111,7 +111,7 @@ export async function POST() {
 
     if (
       message.includes("GOOGLE_SHEETS_CLIENT_EMAIL") ||
-      message.includes("MISSING_CLIENT_EMAIL") ||
+      message.includes("GOOGLE_SHEETS_PRIVATE_KEY") ||
       message.includes("غير مكتملة")
     ) {
       // Thrown by createAuth() when env vars are literally missing
@@ -120,7 +120,7 @@ export async function POST() {
       httpStatus = 503;
     } else if (message.includes("PRIVATE_KEY_FORMAT_ERROR")) {
       code       = "PRIVATE_KEY_FORMAT_ERROR";
-      userMsg    = "تنسيق مفتاح الخدمة غير صحيح — تأكد من صحة private_key داخل GOOGLE_SERVICE_ACCOUNT_JSON";
+      userMsg    = "تنسيق مفتاح الخدمة غير صحيح — تأكد أن GOOGLE_SHEETS_PRIVATE_KEY يبدأ بـ -----BEGIN PRIVATE KEY-----";
       httpStatus = 503;
     } else if (
       message.includes("PERMISSION_DENIED") ||

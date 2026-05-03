@@ -6,6 +6,7 @@ import { useSession } from "next-auth/react";
 import { useQuery } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { arSA } from "date-fns/locale";
+import { formatOrderDate } from "@/lib/date-utils";
 import {
   ShoppingCart, CalendarDays, Package, Truck, CheckCircle,
   RotateCcw, TrendingUp, TrendingDown, CalendarIcon, Tag,
@@ -828,7 +829,7 @@ function DashboardInner() {
                       </Badge>
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground">
-                      {format(new Date(order.orderDate), "dd/MM/yyyy", { locale: arSA })}
+                      {formatOrderDate(order.orderDate)}
                     </TableCell>
                   </TableRow>
                 ))}

@@ -6,6 +6,7 @@ import { useSession } from "next-auth/react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { format, subDays } from "date-fns";
 import { arSA } from "date-fns/locale";
+import { formatOrderDate } from "@/lib/date-utils";
 import { Loader2, Truck, ExternalLink, RefreshCw, CheckSquare, X, CalendarIcon, ChevronDown, Search, Globe, Pencil, Save, Users } from "lucide-react";
 import { toast } from "sonner";
 
@@ -1080,7 +1081,7 @@ export default function ShippingPage() {
                   <TableCell className="text-sm">{order.createdBy.name}</TableCell>
 
                   <TableCell className="text-sm whitespace-nowrap">
-                    {format(new Date(order.orderDate), "dd/MM/yyyy", { locale: arSA })}
+                    {formatOrderDate(order.orderDate)}
                   </TableCell>
 
                   {/* Actions — sticky left keeps buttons visible when table overflows in RTL */}

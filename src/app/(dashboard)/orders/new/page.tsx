@@ -9,6 +9,7 @@ import { z } from "zod";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { arSA } from "date-fns/locale";
+import { formatOrderDate } from "@/lib/date-utils";
 import {
   CalendarIcon, Plus, Trash2, Loader2, ArrowRight,
   AlertTriangle, CheckCircle2, AlertCircle, ExternalLink,
@@ -134,7 +135,7 @@ function DuplicateAlert({
                 <tr key={order.id} className="border-b border-orange-100 last:border-0">
                   <td className="py-1.5 px-2 font-mono text-orange-800">{order.orderNumber}</td>
                   <td className="py-1.5 px-2 text-gray-600">
-                    {format(new Date(order.orderDate), "dd/MM/yy", { locale: arSA })}
+                    {formatOrderDate(order.orderDate)}
                   </td>
                   <td className="py-1.5 px-2 text-gray-700 max-w-[120px] truncate">
                     {order.items[0]?.product.name ?? "—"}

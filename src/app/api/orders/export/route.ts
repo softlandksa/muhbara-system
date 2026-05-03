@@ -5,6 +5,7 @@ import { z } from "zod";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { format } from "date-fns";
+import { formatOrderDate } from "@/lib/date-utils";
 
 const ALLOWED_ROLES = ["ADMIN", "GENERAL_MANAGER", "SALES_MANAGER", "SALES"] as const;
 type AllowedRole = (typeof ALLOWED_ROLES)[number];
@@ -143,7 +144,7 @@ export async function POST(request: NextRequest) {
 
   const rows = orders.map((o) => ({
     "رقم الطلب": o.orderNumber,
-    "تاريخ الطلب": format(new Date(o.orderDate), "dd/MM/yyyy"),
+    "تاريخ الطلب": formatOrderDate(o.orderDate),
     "تاريخ الإدخال": format(new Date(o.createdAt), "dd/MM/yyyy"),
     "اسم العميل": o.customerName,
     "الجوال": o.phone,

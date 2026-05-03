@@ -6,6 +6,7 @@ import { useSession } from "next-auth/react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { format, formatDistanceToNow } from "date-fns";
 import { arSA } from "date-fns/locale";
+import { formatOrderDate } from "@/lib/date-utils";
 import {
   ArrowRight, Loader2, MessageSquare, Package, MapPin, Phone,
   CreditCard, Truck, Clock, FileText, Trash2, RefreshCw, Pencil, Receipt,
@@ -412,7 +413,7 @@ export default function OrderDetailPage() {
             <span className="flex items-center gap-1">
               <span className="font-medium text-foreground/60">تاريخ الطلب:</span>
               <span className="font-semibold text-foreground">
-                {format(new Date(order.orderDate), "EEEE، dd MMMM yyyy", { locale: arSA })}
+                {formatOrderDate(order.orderDate)}
               </span>
             </span>
             <span className="flex items-center gap-1">
@@ -578,7 +579,7 @@ export default function OrderDetailPage() {
               <Separator className="col-span-2" />
               <div>
                 <p className="text-muted-foreground">تاريخ الطلب</p>
-                <p className="font-medium">{format(new Date(order.orderDate), "dd/MM/yyyy", { locale: arSA })}</p>
+                <p className="font-medium">{formatOrderDate(order.orderDate)}</p>
                 <p className="text-xs text-muted-foreground">التاريخ التجاري للطلب</p>
               </div>
               <div>

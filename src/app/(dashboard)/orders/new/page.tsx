@@ -722,7 +722,7 @@ export default function NewOrderPage() {
                       errors.orderDate && "border-destructive"
                     )}
                   >
-                    <span>{orderDate ? formatOrderDate(orderDate) : "اختر تاريخاً"}</span>
+                    <span dir="ltr">{orderDate ? formatOrderDate(orderDate) : "اختر تاريخاً"}</span>
                     <CalendarIcon className="h-4 w-4 opacity-50" />
                   </PopoverTrigger>
                   <PopoverContent className="w-auto p-0" align="start">

@@ -1,4 +1,5 @@
 const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+const LTR = "‎"; // U+200E LEFT-TO-RIGHT MARK — prevents RTL bidi reordering of date segments
 
 const MONTH_MAP: Record<string, number> = {
   jan:0, feb:1, mar:2, apr:3, may:4, jun:5,
@@ -20,9 +21,16 @@ export function formatOrderDate(
   const src = date ?? fallback;
   if (!src) return "";
   try {
-    const d = typeof src === "string" ? new Date(src) : src;
-    if (isNaN(d.getTime())) return "";
-    return `${d.getUTCDate()}-${MONTHS[d.getUTCMonth()]}-${d.getUTCFullYear()}`;
+    if (typeof src === "string") {
+      // API string — stored as UTC midnight, use UTC accessors to avoid day shift
+      const d = new Date(src);
+      if (isNaN(d.getTime())) return "";
+      return `${LTR}${d.getUTCDate()}-${MONTHS[d.getUTCMonth()]}-${d.getUTCFullYear()}`;
+    } else {
+      // Date object from picker — already in local midnight, use local accessors
+      if (isNaN(src.getTime())) return "";
+      return `${LTR}${src.getDate()}-${MONTHS[src.getMonth()]}-${src.getFullYear()}`;
+    }
   } catch { return ""; }
 }
 
@@ -44,7 +52,7 @@ export function formatDateTime(date: Date | string | null | undefined): string {
     const m     = d.getMinutes().toString().padStart(2, "0");
     const ampm  = h >= 12 ? "PM" : "AM";
     const h12   = h % 12 || 12;
-    return `${day}-${month}-${year} ${h12}:${m} ${ampm}`;
+    return `${LTR}${day}-${month}-${year} ${h12}:${m} ${ampm}`;
   } catch { return ""; }
 }
 

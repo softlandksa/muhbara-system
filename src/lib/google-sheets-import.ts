@@ -2,7 +2,7 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { generateOrderNumber } from "@/lib/order-number";
 import { listSheets, readSheetByName, writeSheetResults } from "@/lib/google-sheets";
-import { parseOrderDate } from "@/lib/date-utils";
+import { parseSheetOrderDate } from "@/lib/date-format";
 
 // ─── Column header names (must match the sheet header row exactly) ─────────────
 
@@ -314,7 +314,7 @@ export async function runGoogleSheetsImport(
           if (!externalOrderId) errs.push("External Order ID مطلوب");
 
           const orderDateRaw = getCell(values, headerMap, H_ORDER_DATE);
-          const orderDate = orderDateRaw ? parseOrderDate(orderDateRaw) : null;
+          const orderDate = orderDateRaw ? parseSheetOrderDate(orderDateRaw) : null;
           if (!orderDateRaw || !orderDate) errs.push("تاريخ الطلب غير صالح");
 
           const customerName = getCell(values, headerMap, H_CUSTOMER_NAME);

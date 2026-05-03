@@ -6,7 +6,7 @@ import { useSession } from "next-auth/react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { format, formatDistanceToNow } from "date-fns";
 import { arSA } from "date-fns/locale";
-import { formatOrderDate } from "@/lib/date-utils";
+import { formatOrderDate, formatDateTime } from "@/lib/date-format";
 import {
   ArrowRight, Loader2, MessageSquare, Package, MapPin, Phone,
   CreditCard, Truck, Clock, FileText, Trash2, RefreshCw, Pencil, Receipt,
@@ -183,7 +183,7 @@ function TimelineItem({ entry }: { entry: TimelineEntry }) {
               {formatDistanceToNow(date, { locale: arSA, addSuffix: true })}
             </TooltipTrigger>
             <TooltipContent>
-              {format(date, "dd/MM/yyyy HH:mm", { locale: arSA })}
+              {formatDateTime(date)}
             </TooltipContent>
           </Tooltip>
         </div>
@@ -418,7 +418,7 @@ export default function OrderDetailPage() {
             </span>
             <span className="flex items-center gap-1">
               <span className="font-medium text-foreground/60">أُدخل في النظام:</span>
-              <span>{format(new Date(order.createdAt), "dd/MM/yyyy HH:mm", { locale: arSA })}</span>
+              <span>{formatDateTime(order.createdAt)}</span>
             </span>
             <span className="flex items-center gap-1">
               <span className="font-medium text-foreground/60">أضافه:</span>
@@ -584,7 +584,7 @@ export default function OrderDetailPage() {
               </div>
               <div>
                 <p className="text-muted-foreground">تاريخ الإضافة للنظام</p>
-                <p className="font-medium">{format(new Date(order.createdAt), "dd/MM/yyyy HH:mm", { locale: arSA })}</p>
+                <p className="font-medium">{formatDateTime(order.createdAt)}</p>
                 <p className="text-xs text-muted-foreground">وقت تسجيل الطلب في النظام</p>
               </div>
               <div className="col-span-2">
@@ -692,12 +692,12 @@ export default function OrderDetailPage() {
                 </div>
                 <div>
                   <p className="text-muted-foreground">تاريخ الشحن</p>
-                  <p className="font-medium">{format(new Date(order.shippingInfo.shippedAt), "dd/MM/yyyy", { locale: arSA })}</p>
+                  <p className="font-medium">{formatOrderDate(order.shippingInfo.shippedAt)}</p>
                 </div>
                 {order.shippingInfo.deliveredAt && (
                   <div>
                     <p className="text-muted-foreground">تاريخ التسليم</p>
-                    <p className="font-medium">{format(new Date(order.shippingInfo.deliveredAt), "dd/MM/yyyy", { locale: arSA })}</p>
+                    <p className="font-medium">{formatOrderDate(order.shippingInfo.deliveredAt)}</p>
                   </div>
                 )}
                 <div>

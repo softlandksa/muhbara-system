@@ -6,7 +6,7 @@ import { useSession } from "next-auth/react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { format, subDays } from "date-fns";
 import { arSA } from "date-fns/locale";
-import { formatOrderDate } from "@/lib/date-utils";
+import { formatOrderDate } from "@/lib/date-format";
 import { Loader2, Truck, ExternalLink, RefreshCw, CheckSquare, X, CalendarIcon, ChevronDown, Search, Globe, Pencil, Save, Users } from "lucide-react";
 import { toast } from "sonner";
 
@@ -241,9 +241,9 @@ export default function ShippingPage() {
   const activeDateLabel = useMemo(() => {
     if (!dateFrom && !dateTo) return null;
     if (dateFrom && dateTo && dateFrom === dateTo)
-      return format(new Date(dateFrom), "d MMMM yyyy", { locale: arSA });
-    const from = dateFrom ? format(new Date(dateFrom), "d MMM", { locale: arSA }) : "...";
-    const to   = dateTo   ? format(new Date(dateTo),   "d MMM yyyy", { locale: arSA }) : "...";
+      return formatOrderDate(dateFrom);
+    const from = dateFrom ? formatOrderDate(dateFrom) : "...";
+    const to   = dateTo   ? formatOrderDate(dateTo)   : "...";
     return `${from} — ${to}`;
   }, [dateFrom, dateTo]);
 
@@ -672,7 +672,7 @@ export default function ShippingPage() {
             )}
           >
             <CalendarIcon className="h-3.5 w-3.5" />
-            {dateFrom ? format(new Date(dateFrom), "d MMM", { locale: arSA }) : "من تاريخ"}
+            {dateFrom ? formatOrderDate(dateFrom) : "من تاريخ"}
           </PopoverTrigger>
           <PopoverContent className="w-auto p-0" align="start">
             <Calendar
@@ -699,7 +699,7 @@ export default function ShippingPage() {
             )}
           >
             <CalendarIcon className="h-3.5 w-3.5" />
-            {dateTo ? format(new Date(dateTo), "d MMM", { locale: arSA }) : "إلى تاريخ"}
+            {dateTo ? formatOrderDate(dateTo) : "إلى تاريخ"}
           </PopoverTrigger>
           <PopoverContent className="w-auto p-0" align="start">
             <Calendar

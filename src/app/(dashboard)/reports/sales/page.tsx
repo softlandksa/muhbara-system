@@ -6,6 +6,7 @@ import { useSession } from "next-auth/react";
 import { useQuery } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { arSA } from "date-fns/locale";
+import { formatOrderDate } from "@/lib/date-format";
 import { Download, Filter, CalendarIcon, X, TrendingUp, ShoppingCart, CheckCircle, Percent } from "lucide-react";
 import {
   AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell, LabelList,
@@ -655,7 +656,7 @@ function SalesReportsInner() {
                         </Badge>
                       </TableCell>
                       <TableCell className="text-sm text-muted-foreground">
-                        {format(new Date(o.orderDate), "dd/MM/yyyy", { locale: arSA })}
+                        {formatOrderDate(o.orderDate)}
                       </TableCell>
                       <TableCell className="text-sm">{o.createdBy.name}</TableCell>
                     </TableRow>

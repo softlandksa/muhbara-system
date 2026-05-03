@@ -6,6 +6,7 @@ import { useSession } from "next-auth/react";
 import { useQuery } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { arSA } from "date-fns/locale";
+import { formatOrderDate } from "@/lib/date-format";
 import { CalendarIcon, Target, TrendingUp, Users, CheckCircle2 } from "lucide-react";
 
 import { Card, CardContent } from "@/components/ui/card";
@@ -86,9 +87,9 @@ function TargetCard({ t }: { t: TargetRow }) {
 
         {/* Period */}
         <p className="text-xs text-muted-foreground">
-          {format(new Date(t.periodStart), "dd/MM/yyyy", { locale: arSA })}
+          {formatOrderDate(t.periodStart)}
           {" — "}
-          {format(new Date(t.periodEnd), "dd/MM/yyyy", { locale: arSA })}
+          {formatOrderDate(t.periodEnd)}
         </p>
 
         {/* Progress bar */}
@@ -379,9 +380,9 @@ function TargetsReportInner() {
                 <div key={key} className="space-y-3">
                   <div className="flex items-center gap-2">
                     <Badge variant="outline" className="text-xs">
-                      {format(new Date(ps), "dd/MM/yyyy", { locale: arSA })}
+                      {formatOrderDate(ps)}
                       {" — "}
-                      {format(new Date(pe), "dd/MM/yyyy", { locale: arSA })}
+                      {formatOrderDate(pe)}
                     </Badge>
                     <span className="text-xs text-muted-foreground">{rows.length} تارجت</span>
                   </div>

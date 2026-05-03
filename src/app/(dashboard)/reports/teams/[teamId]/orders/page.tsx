@@ -6,6 +6,7 @@ import { useParams, useSearchParams, useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { useQuery } from "@tanstack/react-query";
 import { format } from "date-fns";
+import { formatOrderDate } from "@/lib/date-format";
 import {
   ArrowRight, Download, Search, Filter, X, CalendarIcon,
   ShoppingCart, CheckCircle, Truck, RotateCcw, XCircle, ChevronLeft, ChevronRight,
@@ -406,7 +407,7 @@ function TeamOrdersInner() {
                     </td>
                     <td className="px-4 py-3 text-muted-foreground text-xs">{order.createdBy?.name ?? "—"}</td>
                     <td className="px-4 py-3 text-muted-foreground text-xs">
-                      {format(new Date(order.orderDate), "dd/MM/yyyy")}
+                      {formatOrderDate(order.orderDate)}
                     </td>
                   </tr>
                 ))}

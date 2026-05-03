@@ -5,6 +5,7 @@ import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { arSA } from "date-fns/locale";
+import { formatDateTime } from "@/lib/date-format";
 import {
   MessageSquare, Search, Filter, X, CalendarIcon,
   ExternalLink, Loader2, Clock,
@@ -136,7 +137,7 @@ function NotesDialog({
                   <span className="font-medium text-foreground">{note.createdBy.name}</span>
                   <span className="flex items-center gap-1">
                     <Clock className="h-3 w-3" />
-                    {format(new Date(note.createdAt), "dd/MM/yyyy HH:mm", { locale: arSA })}
+                    {formatDateTime(note.createdAt)}
                   </span>
                 </div>
                 <p className="text-sm bg-muted rounded px-3 py-2">{note.note}</p>

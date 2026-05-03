@@ -6,6 +6,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { format, formatDistanceToNow } from "date-fns";
 import { arSA } from "date-fns/locale";
+import { formatOrderDate } from "@/lib/date-format";
 import {
   ArrowRight, Users, Clock, TrendingUp, ShoppingCart, CheckCircle,
   Truck, RotateCcw, XCircle, Filter, X, CalendarIcon, Download,
@@ -535,7 +536,7 @@ function EmployeeDetail({
                 <TableRow key={order.id}>
                   <TableCell className="font-mono text-sm">{order.orderNumber}</TableCell>
                   <TableCell className="text-sm">
-                    {format(new Date(order.orderDate), "dd/MM/yyyy", { locale: arSA })}
+                    {formatOrderDate(order.orderDate)}
                   </TableCell>
                   <TableCell>
                     <div className="font-medium text-sm">{order.customerName}</div>

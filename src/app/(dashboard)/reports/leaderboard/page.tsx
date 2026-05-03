@@ -6,6 +6,7 @@ import { useSession } from "next-auth/react";
 import { useQuery } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { arSA } from "date-fns/locale";
+import { formatOrderDate } from "@/lib/date-format";
 import { Trophy, CalendarIcon, Users, TrendingUp, ShoppingCart } from "lucide-react";
 
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -205,9 +206,9 @@ function LeaderboardInner() {
       {board && (
         <p className="text-xs text-muted-foreground">
           الفترة:{" "}
-          {format(new Date(board.periodStart), "dd MMMM yyyy", { locale: arSA })}
+          {formatOrderDate(board.periodStart)}
           {" — "}
-          {format(new Date(board.periodEnd), "dd MMMM yyyy", { locale: arSA })}
+          {formatOrderDate(board.periodEnd)}
         </p>
       )}
 

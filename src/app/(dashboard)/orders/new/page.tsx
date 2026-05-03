@@ -9,7 +9,7 @@ import { z } from "zod";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { arSA } from "date-fns/locale";
-import { formatOrderDate } from "@/lib/date-utils";
+import { formatOrderDate } from "@/lib/date-format";
 import {
   CalendarIcon, Plus, Trash2, Loader2, ArrowRight,
   AlertTriangle, CheckCircle2, AlertCircle, ExternalLink,
@@ -722,7 +722,7 @@ export default function NewOrderPage() {
                       errors.orderDate && "border-destructive"
                     )}
                   >
-                    <span>{orderDate ? format(orderDate, "dd/MM/yyyy", { locale: arSA }) : "اختر تاريخاً"}</span>
+                    <span>{orderDate ? formatOrderDate(orderDate) : "اختر تاريخاً"}</span>
                     <CalendarIcon className="h-4 w-4 opacity-50" />
                   </PopoverTrigger>
                   <PopoverContent className="w-auto p-0" align="start">

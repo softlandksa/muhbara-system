@@ -6,7 +6,7 @@ import { useSession } from "next-auth/react";
 import { useQuery } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { arSA } from "date-fns/locale";
-import { formatOrderDate } from "@/lib/date-utils";
+import { formatOrderDate } from "@/lib/date-format";
 import {
   ShoppingCart, CalendarDays, Package, Truck, CheckCircle,
   RotateCcw, TrendingUp, TrendingDown, CalendarIcon, Tag,

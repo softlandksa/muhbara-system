@@ -5,6 +5,7 @@ import { useSession } from "next-auth/react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { arSA } from "date-fns/locale";
+import { formatOrderDate } from "@/lib/date-format";
 import { Plus, Pencil, Trash2, Loader2, CalendarIcon, Target } from "lucide-react";
 import { toast } from "sonner";
 import { z } from "zod";
@@ -384,9 +385,9 @@ function AdminTargetsInner() {
                   {t.user.team?.name ?? "—"}
                 </TableCell>
                 <TableCell className="text-sm font-mono">
-                  {format(new Date(t.periodStart), "dd/MM/yyyy", { locale: arSA })}
+                  {formatOrderDate(t.periodStart)}
                   {" — "}
-                  {format(new Date(t.periodEnd), "dd/MM/yyyy", { locale: arSA })}
+                  {formatOrderDate(t.periodEnd)}
                 </TableCell>
                 <TableCell>
                   {t.targetDeliveredOrderCount != null

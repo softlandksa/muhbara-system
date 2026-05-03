@@ -6,6 +6,7 @@ import { useSession } from "next-auth/react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { arSA } from "date-fns/locale";
+import { formatOrderDate } from "@/lib/date-format";
 import { CalendarIcon, Target, TrendingUp, DollarSign, Users, Info } from "lucide-react";
 import { toast } from "sonner";
 
@@ -337,7 +338,7 @@ function CommissionsInner() {
           {/* Period label */}
           {targetData && (
             <p className="text-sm text-muted-foreground">
-              الفترة: {format(new Date(targetData.periodStart), "dd/MM/yyyy", { locale: arSA })} — {format(new Date(targetData.periodEnd), "dd/MM/yyyy", { locale: arSA })}
+              الفترة: {formatOrderDate(targetData.periodStart)} — {formatOrderDate(targetData.periodEnd)}
             </p>
           )}
 
@@ -445,7 +446,7 @@ function CommissionsInner() {
                         <div className="text-xs text-muted-foreground">{ROLE_LABELS[c.user.role]}</div>
                       </TableCell>
                       <TableCell className="text-sm">
-                        {format(new Date(c.periodStart),"dd/MM/yyyy",{locale:arSA})} — {format(new Date(c.periodEnd),"dd/MM/yyyy",{locale:arSA})}
+                        {formatOrderDate(c.periodStart)} — {formatOrderDate(c.periodEnd)}
                       </TableCell>
                       <TableCell className="text-center font-mono">{c.totalDeliveredOrders}</TableCell>
                       <TableCell className="text-sm">

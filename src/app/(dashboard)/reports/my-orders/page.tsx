@@ -6,6 +6,7 @@ import { useSession } from "next-auth/react";
 import { useQuery } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { arSA } from "date-fns/locale";
+import { formatOrderDate } from "@/lib/date-format";
 import { Filter, X, CalendarIcon, ShoppingCart, DollarSign, Truck } from "lucide-react";
 import {
   BarChart, Bar, PieChart, Pie, Cell, LabelList,
@@ -459,7 +460,7 @@ function MyOrdersInner() {
                             )}
                           </TableCell>
                           <TableCell className="text-sm text-muted-foreground">
-                            {format(new Date(o.orderDate), "dd/MM/yyyy", { locale: arSA })}
+                            {formatOrderDate(o.orderDate)}
                           </TableCell>
                         </TableRow>
                       ))}

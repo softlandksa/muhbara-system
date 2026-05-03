@@ -5,7 +5,7 @@ import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { useQuery } from "@tanstack/react-query";
 import { format } from "date-fns";
-import { arSA } from "date-fns/locale";
+import { formatDateTime } from "@/lib/date-format";
 import { Activity, CalendarIcon, ChevronLeft, ChevronRight } from "lucide-react";
 
 import { Card, CardContent } from "@/components/ui/card";
@@ -227,7 +227,7 @@ function ActivityLogInner() {
                 ) : logs.map(log => (
                   <TableRow key={log.id}>
                     <TableCell className="text-sm font-mono whitespace-nowrap">
-                      {format(new Date(log.createdAt), "dd/MM/yyyy HH:mm:ss", { locale: arSA })}
+                      {formatDateTime(log.createdAt)}
                     </TableCell>
                     <TableCell>
                       <div className="font-medium text-sm">{log.user.name}</div>

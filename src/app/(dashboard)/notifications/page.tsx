@@ -3,8 +3,9 @@
 import { Suspense } from "react";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { formatDistanceToNow, format } from "date-fns";
+import { formatDistanceToNow } from "date-fns";
 import { arSA } from "date-fns/locale";
+import { formatDateTime } from "@/lib/date-format";
 import { Bell, CheckCheck, ExternalLink } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -139,7 +140,7 @@ function NotificationsInner() {
                       {formatDistanceToNow(new Date(n.createdAt), { locale: arSA, addSuffix: true })}
                     </TooltipTrigger>
                     <TooltipContent>
-                      {format(new Date(n.createdAt), "dd/MM/yyyy HH:mm", { locale: arSA })}
+                      {formatDateTime(n.createdAt)}
                     </TooltipContent>
                   </Tooltip>
                 </div>

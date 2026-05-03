@@ -30,9 +30,22 @@ export async function GET() {
       duplicateCount: true,
       failedCount: true,
       triggeredBy: true,
+      triggeredByUserId: true,
       errorSummary: true,
     },
   });
 
-  return NextResponse.json({ data: last });
+  if (!last) return NextResponse.json({ data: null });
+
+  let updatedBy: { name: string; email: string; role: string } | null = null;
+  if (last.triggeredByUserId) {
+    const user = await prisma.user.findUnique({
+      where: { id: last.triggeredByUserId },
+      select: { name: true, email: true, role: true },
+    });
+    if (user) updatedBy = user;
+  }
+
+  const { triggeredByUserId: _omit, ...rest } = last;
+  return NextResponse.json({ data: { ...rest, updatedBy } });
 }

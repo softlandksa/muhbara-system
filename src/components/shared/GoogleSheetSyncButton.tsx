@@ -2,9 +2,17 @@
 
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { RefreshCw, Loader2, Clock } from "lucide-react";
+import { RefreshCw, Loader2, Clock, User, Mail, Shield, CalendarDays, Timer } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { ROLE_LABELS } from "@/lib/permissions";
+import type { Role } from "@/types";
+import {
+  Tooltip,
+  TooltipTrigger,
+  TooltipContent,
+  TooltipProvider,
+} from "@/components/ui/tooltip";
 
 // ─── Arabic date helpers ──────────────────────────────────────────────────────
 
@@ -24,18 +32,20 @@ function formatRelative(date: Date): string {
   return diffDay === 1 ? "منذ يوم" : `منذ ${diffDay} أيام`;
 }
 
-function formatExact(date: Date): string {
-  const d = date.getDate();
-  const m = ARABIC_MONTHS[date.getMonth()];
-  const y = date.getFullYear();
+function formatDate(date: Date): string {
+  return `${date.getDate()} ${ARABIC_MONTHS[date.getMonth()]} ${date.getFullYear()}`;
+}
+
+function formatTime(date: Date): string {
   const h24 = date.getHours();
   const min = String(date.getMinutes()).padStart(2, "0");
   const h12 = h24 % 12 || 12;
-  const ampm = h24 >= 12 ? "م" : "ص";
-  return `${d} ${m} ${y} — ${h12}:${min} ${ampm}`;
+  return `${h12}:${min} ${h24 >= 12 ? "م" : "ص"}`;
 }
 
 // ─── Types ────────────────────────────────────────────────────────────────────
+
+type UpdatedBy = { name: string; email: string; role: string };
 
 type LastSyncInfo = {
   id: string;
@@ -49,6 +59,7 @@ type LastSyncInfo = {
   duplicateCount: number;
   failedCount: number;
   triggeredBy: string;
+  updatedBy: UpdatedBy | null;
   errorSummary: string | null;
 } | null;
 
@@ -87,6 +98,8 @@ export function GoogleSheetSyncButton({
 
   const last = data?.data;
   const finishedAt = last?.finishedAt ? new Date(last.finishedAt) : null;
+  const isCron = last?.triggeredBy === "CRON";
+  const byLabel = last?.updatedBy?.name ?? (isCron ? "جدولة تلقائية" : null);
 
   async function handleSync() {
     if (syncing) return;
@@ -112,16 +125,16 @@ export function GoogleSheetSyncButton({
           `صفوف: ${totalRows}`,
           `مستورد: ${importedCount}`,
         ];
-        if (duplicateCount > 0) parts.push(`عملاء مكررين: ${duplicateCount}`);
+        if (duplicateCount > 0) parts.push(`مكررون: ${duplicateCount}`);
         if (skippedCount > 0)   parts.push(`متخطى: ${skippedCount}`);
         if (failedCount > 0)    parts.push(`فاشل: ${failedCount}`);
 
-        toast.success("تم تحديث البيانات بنجاح", {
+        toast.success("تم التحديث بنجاح", {
           description: parts.join(" · "),
           duration: 7000,
         });
       } else {
-        toast.success("تم تحديث البيانات بنجاح");
+        toast.success("تم التحديث بنجاح");
       }
 
       await queryClient.invalidateQueries({ queryKey: ["google-sheets-last-sync"] });
@@ -136,31 +149,24 @@ export function GoogleSheetSyncButton({
 
   return (
     <div className="flex items-center gap-3">
-      {/* ── Gradient sync button ───────────────────────────────────────────── */}
+
+      {/* ── Sync button ─────────────────────────────────────────────────────── */}
       <button
         type="button"
         onClick={handleSync}
         disabled={syncing}
-        className={cn(
-          // layout
-          "relative inline-flex items-center gap-2 px-4 py-2 rounded-xl",
-          // typography
-          "text-sm font-semibold text-white",
-          // gradient (blue-600 → violet-600, left-to-right visually)
-          "bg-gradient-to-r from-blue-600 to-violet-600",
-          // shadow
-          "shadow-md shadow-blue-500/30",
-          // hover
-          "hover:shadow-lg hover:shadow-violet-500/40 hover:scale-105",
-          // active feedback
-          "active:scale-[0.98]",
-          // smooth
-          "transition-all duration-200 ease-out",
-          // disabled
-          "disabled:opacity-60 disabled:cursor-not-allowed",
-          "disabled:hover:scale-100 disabled:hover:shadow-md disabled:hover:shadow-blue-500/30"
-        )}
         title="تحديث البيانات من Google Sheets"
+        className={cn(
+          "relative inline-flex items-center gap-2 px-4 py-2 rounded-xl",
+          "text-sm font-semibold text-white",
+          "bg-blue-600",
+          "shadow-md shadow-blue-500/30",
+          "hover:bg-blue-700 hover:shadow-lg hover:shadow-blue-500/40 hover:scale-105",
+          "active:scale-[0.97]",
+          "transition-all duration-200 ease-out",
+          "disabled:opacity-60 disabled:cursor-not-allowed",
+          "disabled:hover:scale-100 disabled:hover:bg-blue-600 disabled:hover:shadow-md disabled:hover:shadow-blue-500/30",
+        )}
       >
         {syncing ? (
           <Loader2 className="h-4 w-4 animate-spin shrink-0" />
@@ -170,23 +176,80 @@ export function GoogleSheetSyncButton({
         <span>{syncing ? "جاري التحديث..." : "تحديث البيانات"}</span>
       </button>
 
-      {/* ── Last sync timestamp ────────────────────────────────────────────── */}
-      {finishedAt && (
-        <div className="hidden md:flex flex-col items-start leading-tight">
-          <span className="flex items-center gap-1 text-xs font-medium text-muted-foreground">
-            <Clock className="h-3 w-3 shrink-0" />
-            {formatRelative(finishedAt)}
-          </span>
-          <span className="text-[10px] text-muted-foreground/70 mt-0.5">
-            {formatExact(finishedAt)}
-          </span>
-          {last?.status === "FAILED" && (
-            <span className="text-[10px] font-medium text-red-500 mt-0.5">
-              فشلت المزامنة الأخيرة
-            </span>
-          )}
-        </div>
+      {/* ── Last sync info + tooltip ─────────────────────────────────────────── */}
+      {finishedAt && byLabel && (
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger
+              dir="rtl"
+              className="hidden md:flex flex-col items-start leading-tight cursor-default select-none bg-transparent border-0 p-0 m-0 text-start"
+            >
+              <span className="flex items-center gap-1 text-xs font-medium text-muted-foreground">
+                <Clock className="h-3 w-3 shrink-0" />
+                {formatRelative(finishedAt)}
+                <span className="text-muted-foreground/50 mx-0.5">•</span>
+                <span>بواسطة: {byLabel}</span>
+              </span>
+              {last?.status === "FAILED" && (
+                <span className="text-[10px] font-medium text-red-500 mt-0.5">
+                  فشلت المزامنة الأخيرة
+                </span>
+              )}
+            </TooltipTrigger>
+
+            <TooltipContent
+              side="bottom"
+              align="end"
+              className="flex-col items-start gap-0 p-0 max-w-72 overflow-hidden"
+            >
+              <div dir="rtl" className="flex flex-col gap-0 text-xs w-full">
+
+                {/* User info block */}
+                {last?.updatedBy ? (
+                  <div className="flex flex-col gap-1.5 px-3 pt-2.5 pb-2">
+                    <div className="flex items-center gap-2">
+                      <User className="h-3 w-3 opacity-60 shrink-0" />
+                      <span className="font-semibold">{last.updatedBy.name}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Mail className="h-3 w-3 opacity-60 shrink-0" />
+                      <span dir="ltr" className="opacity-80">{last.updatedBy.email}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Shield className="h-3 w-3 opacity-60 shrink-0" />
+                      <span className="opacity-80">
+                        {ROLE_LABELS[last.updatedBy.role as Role] ?? last.updatedBy.role}
+                      </span>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2 px-3 pt-2.5 pb-2">
+                    <RefreshCw className="h-3 w-3 opacity-60 shrink-0" />
+                    <span className="font-semibold">جدولة تلقائية</span>
+                  </div>
+                )}
+
+                {/* Divider */}
+                <div className="h-px bg-background/20 mx-0" />
+
+                {/* Date + time block */}
+                <div className="flex flex-col gap-1.5 px-3 pt-2 pb-2.5">
+                  <div className="flex items-center gap-2">
+                    <CalendarDays className="h-3 w-3 opacity-60 shrink-0" />
+                    <span className="opacity-80">{formatDate(finishedAt)}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Timer className="h-3 w-3 opacity-60 shrink-0" />
+                    <span className="opacity-80">{formatTime(finishedAt)}</span>
+                  </div>
+                </div>
+
+              </div>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
       )}
+
     </div>
   );
 }

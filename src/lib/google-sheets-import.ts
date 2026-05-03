@@ -432,16 +432,21 @@ export async function runGoogleSheetsImport(
           // ── Duplicate customer check ───────────────────────────────────
           const normPhone = normalizePhone(phone);
           const normName = normalizeName(customerName);
-          const isDuplicate =
-            (normPhone.length > 0 && existingPhones.has(normPhone)) ||
-            (normName.length > 0 && existingNames.has(normName));
+          const phoneMatches = normPhone.length > 0 && existingPhones.has(normPhone);
+          const nameMatches = normName.length > 0 && existingNames.has(normName);
 
-          if (isDuplicate) {
+          if (phoneMatches || nameMatches) {
             duplicateCount++;
-            const errorMessage = "العميل موجود بالفعل بنفس الاسم أو رقم الجوال";
+            const errorMessage =
+              phoneMatches && nameMatches
+                ? "طلب مكرر بسبب تطابق اسم العميل أو رقم الجوال"
+                : phoneMatches
+                ? "طلب مكرر بسبب تطابق رقم الجوال"
+                : "طلب مكرر بسبب تطابق اسم العميل";
             console.warn(
               `[GoogleSheetsImport] sheet="${sheetName}" row ${rowIndex} — ` +
-              `duplicate customer: name="${customerName}" phone="${phone}"`
+              `duplicate: name="${customerName}" phone="${phone}" ` +
+              `(phoneMatch=${phoneMatches} nameMatch=${nameMatches})`
             );
             sheetWriteBacks.push({
               rowIndex,
@@ -455,10 +460,10 @@ export async function runGoogleSheetsImport(
                   where: { externalOrderId },
                   create: {
                     externalOrderId, spreadsheetId, sheetName,
-                    rowNumber: rowIndex, status: "FAILED", errorMessage,
+                    rowNumber: rowIndex, status: "DUPLICATE", errorMessage,
                   },
                   update: {
-                    rowNumber: rowIndex, sheetName, status: "FAILED", errorMessage,
+                    rowNumber: rowIndex, sheetName, status: "DUPLICATE", errorMessage,
                   },
                 })
                 .catch(() => {});
@@ -668,6 +673,9 @@ export async function runGoogleSheetsImport(
       `rows: ${totalRows} | imported: ${importedCount} | ` +
       `duplicates: ${duplicateCount} | skipped: ${skippedCount} | failed: ${failedCount}`
     );
+    console.log("GOOGLE_SYNC_IMPORTED_COUNT", importedCount);
+    console.log("GOOGLE_SYNC_DUPLICATE_COUNT", duplicateCount);
+    console.log("GOOGLE_SYNC_FAILED_COUNT", failedCount);
 
     await prisma.googleSheetSyncRun.update({
       where: { id: syncRun.id },

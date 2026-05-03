@@ -113,7 +113,7 @@ export async function GET(request: NextRequest) {
     prisma.order.findMany({
       where,
       include: orderInclude,
-      orderBy: { createdAt: "desc" },
+      orderBy: [{ orderDate: "desc" }, { createdAt: "desc" }],
       skip: (page - 1) * pageSize,
       take: pageSize,
     }),

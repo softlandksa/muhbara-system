@@ -2,6 +2,7 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { generateOrderNumber } from "@/lib/order-number";
 import { listSheets, readSheetByName, writeSheetResults } from "@/lib/google-sheets";
+import { parseOrderDate } from "@/lib/date-utils";
 
 // ─── Column header names (must match the sheet header row exactly) ─────────────
 
@@ -89,31 +90,6 @@ function guessMime(url: string): string {
   return "application/octet-stream";
 }
 
-function parseDate(raw: string): Date | null {
-  if (!raw) return null;
-
-  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
-    const d = new Date(raw + "T00:00:00");
-    return isNaN(d.getTime()) ? null : d;
-  }
-
-  const dmy = raw.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
-  if (dmy) {
-    const d = new Date(
-      `${dmy[3]}-${dmy[2]!.padStart(2, "0")}-${dmy[1]!.padStart(2, "0")}T00:00:00`
-    );
-    return isNaN(d.getTime()) ? null : d;
-  }
-
-  const serial = Number(raw);
-  if (!isNaN(serial) && serial > 1000 && serial < 2958466) {
-    const d = new Date(new Date(1899, 11, 30).getTime() + serial * 86400000);
-    return isNaN(d.getTime()) ? null : d;
-  }
-
-  const fallback = new Date(raw);
-  return isNaN(fallback.getTime()) ? null : fallback;
-}
 
 // ─── Main export ──────────────────────────────────────────────────────────────
 
@@ -338,9 +314,8 @@ export async function runGoogleSheetsImport(
           if (!externalOrderId) errs.push("External Order ID مطلوب");
 
           const orderDateRaw = getCell(values, headerMap, H_ORDER_DATE);
-          const orderDate = orderDateRaw ? parseDate(orderDateRaw) : null;
-          if (!orderDateRaw) errs.push("Order Date مطلوب");
-          else if (!orderDate) errs.push(`تنسيق تاريخ غير صحيح: ${orderDateRaw}`);
+          const orderDate = orderDateRaw ? parseOrderDate(orderDateRaw) : null;
+          if (!orderDateRaw || !orderDate) errs.push("تاريخ الطلب غير صالح");
 
           const customerName = getCell(values, headerMap, H_CUSTOMER_NAME);
           if (!customerName) errs.push("Customer Name مطلوب");

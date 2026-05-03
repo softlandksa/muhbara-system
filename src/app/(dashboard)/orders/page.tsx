@@ -5,7 +5,7 @@ import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
-import { arSA } from "date-fns/locale";
+import { formatOrderDate } from "@/lib/date-utils";
 import {
   Plus, Download, Upload, Loader2, ChevronRight, ChevronLeft,
   Filter, X, CalendarIcon, FileDown, AlertCircle, CheckCircle2, Trash2,
@@ -1324,7 +1324,7 @@ function OrdersPageInner({ setImportOpen }: { setImportOpen: (open: boolean) => 
                     </Badge>
                   </TableCell>
                   <TableCell className="text-sm">
-                    {format(new Date(order.orderDate), "dd/MM/yyyy", { locale: arSA })}
+                    {formatOrderDate(order.orderDate)}
                   </TableCell>
                   <TableCell className="text-sm">{order.createdBy.name}</TableCell>
                 </TableRow>

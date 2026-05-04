@@ -2,10 +2,11 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { runGoogleSheetsImport } from "@/lib/google-sheets-import";
+import { runGoogleSheetsImport, type SyncMode } from "@/lib/google-sheets-import";
 import type { Role } from "@/types";
 
-const ALLOWED_ROLES: Role[] = ["ADMIN", "GENERAL_MANAGER", "SHIPPING"];
+const UPDATE_ROLES: Role[]  = ["ADMIN", "GENERAL_MANAGER", "SHIPPING"];
+const RESYNC_ROLES: Role[]  = ["ADMIN", "GENERAL_MANAGER"];
 
 function getMissingEnvVars(): string[] {
   const missing: string[] = [];
@@ -31,7 +32,7 @@ function getMissingEnvVars(): string[] {
   return missing;
 }
 
-export async function POST() {
+export async function POST(request: Request) {
   const isDev = process.env.NODE_ENV !== "production";
 
   console.log("GOOGLE_SYNC_ROUTE_HIT");
@@ -41,8 +42,21 @@ export async function POST() {
   if (!session) return NextResponse.json({ error: "غير مصرح" }, { status: 401 });
 
   const { role, id: userId } = session.user;
-  if (!ALLOWED_ROLES.includes(role as Role)) {
+  if (!UPDATE_ROLES.includes(role as Role)) {
     return NextResponse.json({ error: "ممنوع" }, { status: 403 });
+  }
+
+  // ── Parse mode ──────────────────────────────────────────────────────────────
+  let mode: SyncMode = "update";
+  try {
+    const body = await request.json().catch(() => ({})) as { mode?: unknown };
+    if (body.mode === "resync" || body.mode === "update") mode = body.mode;
+  } catch {
+    // default to "update" on any parse failure
+  }
+
+  if (mode === "resync" && !RESYNC_ROLES.includes(role as Role)) {
+    return NextResponse.json({ error: "إعادة المزامنة متاحة للمدير العام والمسؤول فقط" }, { status: 403 });
   }
 
   // ── Env var check ───────────────────────────────────────────────────────────
@@ -86,11 +100,12 @@ export async function POST() {
 
   // ── Run import ───────────────────────────────────────────────────────────────
   try {
-    const result = await runGoogleSheetsImport("MANUAL", userId);
+    const result = await runGoogleSheetsImport("MANUAL", mode, userId);
     console.log(
-      `GOOGLE_SYNC_COMPLETED sheets:${result.totalSheets} skipped:${result.sheetsSkipped} ` +
-      `rows:${result.totalRows} imported:${result.importedCount} ` +
-      `duplicates:${result.duplicateCount} emptySkipped:${result.skippedEmptyCount} failed:${result.failedCount}`
+      `GOOGLE_SYNC_COMPLETED mode:${result.mode} sheets:${result.totalSheets} skipped:${result.sheetsSkipped} ` +
+      `rows:${result.totalRows} imported:${result.importedCount} updated:${result.updatedCount} ` +
+      `noChange:${result.noChangeCount} duplicates:${result.duplicateCount} ` +
+      `emptySkipped:${result.skippedEmptyCount} failed:${result.failedCount} deleted:${result.deletedCount}`
     );
     return NextResponse.json({ success: true, data: result });
   } catch (err) {

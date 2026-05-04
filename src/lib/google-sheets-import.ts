@@ -6,38 +6,44 @@ import { parseSheetOrderDate } from "@/lib/date-format";
 
 // ─── Column header names (must match the sheet header row exactly) ─────────────
 
-const H_EXTERNAL_ID = "External Order ID";
-const H_ORDER_DATE = "Order Date";
-const H_CUSTOMER_NAME = "Customer Name";
-const H_PHONE = "Phone";
-const H_COUNTRY = "Country";
-const H_CITY = "City";
-const H_ADDRESS = "Detailed Address";
-const H_PRODUCT = "Product";
-const H_QUANTITY = "Quantity";
-const H_PAID_AMOUNT = "Paid Amount";
-const H_CURRENCY = "Currency";
-const H_PAYMENT_METHOD = "Payment Method";
-const H_RECEIPT_1 = "Receipt URL 1";
-const H_RECEIPT_2 = "Receipt URL 2";
-const H_RECEIPT_3 = "Receipt URL 3";
-const H_NOTES = "Notes";
-const H_EMPLOYEE_EMAIL = "Employee Email";
-const H_SYNC_STATUS = "Sync Status";
+const H_EXTERNAL_ID     = "External Order ID";
 const H_SYSTEM_ORDER_ID = "System Order ID";
-const H_ERROR_MESSAGE = "Error Message";
+const H_ORDER_DATE      = "Order Date";
+const H_CUSTOMER_NAME   = "Customer Name";
+const H_PHONE           = "Phone";
+const H_COUNTRY         = "Country";
+const H_CITY            = "City";
+const H_ADDRESS         = "Detailed Address";
+const H_PRODUCT         = "Product";
+const H_QUANTITY        = "Quantity";
+const H_PAID_AMOUNT     = "Paid Amount";
+const H_CURRENCY        = "Currency";
+const H_PAYMENT_METHOD  = "Payment Method";
+const H_RECEIPT_1       = "Receipt URL 1";
+const H_RECEIPT_2       = "Receipt URL 2";
+const H_RECEIPT_3       = "Receipt URL 3";
+const H_NOTES           = "Notes";
+const H_EMPLOYEE_EMAIL  = "Employee Email";
+const H_SYNC_STATUS     = "Sync Status";
+const H_ERROR_MESSAGE   = "Error Message";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
+export type SyncMode = "update" | "resync";
+
 export type SyncResult = {
   syncRunId: string;
+  mode: SyncMode;
   totalSheets: number;
   sheetsSkipped: number;
   totalRows: number;
   importedCount: number;
+  updatedCount: number;
+  noChangeCount: number;
   skippedEmptyCount: number;
   duplicateCount: number;
   failedCount: number;
+  deletedCount: number;
   startedAt: Date;
   finishedAt: Date;
 };
@@ -45,11 +51,29 @@ export type SyncResult = {
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 type HeaderMap = Record<string, number>;
+
 type WriteBack = {
   rowIndex: number;
   syncStatus: string;
   systemOrderId: string;
   errorMessage: string;
+};
+
+type ExistingOrder = {
+  id: string;
+  orderNumber: string;
+  customerName: string;
+  phone: string;
+  address: string;
+  countryId: string;
+  currencyId: string;
+  paymentMethodId: string;
+  totalAmount: number;
+  notes: string | null;
+  orderDate: Date;
+  createdById: string;
+  teamId: string | null;
+  items: { productId: string; quantity: number; unitPrice: number }[];
 };
 
 function getCell(values: string[], map: HeaderMap, col: string): string {
@@ -66,11 +90,6 @@ function normalizePhone(raw: string): string {
   return raw.replace(/\D/g, "").replace(/^0+/, "");
 }
 
-/** Trims, collapses whitespace, lowercases for name comparison. */
-function normalizeName(raw: string): string {
-  return raw.trim().replace(/\s+/g, " ").toLowerCase();
-}
-
 function isValidHttpUrl(raw: string): boolean {
   if (!raw) return false;
   try {
@@ -83,17 +102,14 @@ function isValidHttpUrl(raw: string): boolean {
 
 function guessMime(url: string): string {
   const lower = url.split("?")[0].toLowerCase();
-  if (lower.endsWith(".pdf")) return "application/pdf";
+  if (lower.endsWith(".pdf"))  return "application/pdf";
   if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
-  if (lower.endsWith(".png")) return "image/png";
+  if (lower.endsWith(".png"))  return "image/png";
   if (lower.endsWith(".webp")) return "image/webp";
   return "application/octet-stream";
 }
 
-/**
- * Returns true if none of the four key identifier fields contain any data.
- * Such rows are silently skipped with no write-back.
- */
+/** Returns true when none of the four key identifier fields contain any data. */
 function isRowEmpty(values: string[], map: HeaderMap): boolean {
   return (
     !getCell(values, map, H_EXTERNAL_ID) &&
@@ -103,84 +119,137 @@ function isRowEmpty(values: string[], map: HeaderMap): boolean {
   );
 }
 
+/**
+ * Compares the relevant sheet-derived values against the existing order.
+ * Returns true if any field differs (i.e. an update is needed).
+ */
+function hasOrderChanged(
+  existing: ExistingOrder,
+  next: {
+    customerName: string;
+    phone: string;
+    address: string;
+    countryId: string;
+    currencyId: string;
+    paymentMethodId: string;
+    totalAmount: number;
+    notes: string | null;
+    orderDate: Date;
+    productId: string;
+    quantity: number;
+  },
+): boolean {
+  const item = existing.items[0];
+  return (
+    existing.customerName    !== next.customerName   ||
+    existing.phone           !== next.phone          ||
+    existing.address         !== next.address        ||
+    existing.countryId       !== next.countryId      ||
+    existing.currencyId      !== next.currencyId     ||
+    existing.paymentMethodId !== next.paymentMethodId ||
+    Math.abs(existing.totalAmount - next.totalAmount) > 0.001 ||
+    (existing.notes ?? null) !== (next.notes ?? null) ||
+    existing.orderDate.getTime() !== next.orderDate.getTime() ||
+    item?.productId !== next.productId ||
+    item?.quantity  !== next.quantity
+  );
+}
+
+const ORDER_SELECT = {
+  id: true, orderNumber: true, customerName: true, phone: true,
+  address: true, countryId: true, currencyId: true, paymentMethodId: true,
+  totalAmount: true, notes: true, orderDate: true, createdById: true, teamId: true,
+  items: { select: { productId: true, quantity: true, unitPrice: true } },
+} as const;
 
 // ─── Main export ──────────────────────────────────────────────────────────────
 
 /**
- * Scans every sheet/tab in the configured spreadsheet and imports new orders.
+ * Scans every sheet/tab in the configured spreadsheet and imports / updates orders.
  *
- * Per-sheet behaviour:
- *   - Sheets missing the required write-back columns are silently skipped.
- *   - Errors reading one sheet do not abort processing of subsequent sheets.
+ * mode "update"  — safe daily mode: only creates new orders, never touches existing ones.
+ * mode "resync"  — admin-only: creates new + updates changed + hard-deletes orders
+ *                  whose externalOrderId is no longer present in any sheet.
  *
- * Duplicate prevention:
- *   - Rows whose External Order ID is already in the import log as SYNCED → skipped.
- *   - Rows whose customer name OR phone matches an existing order → Duplicate.
- *   - Newly imported customers are added to the in-memory sets so the same
- *     customer cannot be created twice within the same sync run across sheets.
+ * Row priority per mode:
+ *   "update":
+ *     1. Skip empty rows silently
+ *     2. Skip already-"Synced" rows (the order already exists)
+ *     3. Validate required fields
+ *     4. Existing order found → No Change (write back, count as noChange)
+ *     5. Duplicate phone → Duplicate
+ *     6. Otherwise → Create new order → Synced
+ *
+ *   "resync":
+ *     1. Skip empty rows silently
+ *     2. Process ALL rows (including previously-Synced)
+ *     3. Validate required fields
+ *     4. Existing order found + changed → Update (never changes status)
+ *     5. Existing order found + same → No Change
+ *     6. Not found + duplicate phone → Duplicate
+ *     7. Not found + no duplicate → Create new order → Synced
+ *     8. After all sheets: hard-delete orders (source=GOOGLE_SHEETS) whose
+ *        externalOrderId was NOT seen in any sheet.
  */
 export async function runGoogleSheetsImport(
   triggeredBy: "MANUAL" | "CRON",
-  triggeredByUserId?: string
+  mode: SyncMode,
+  triggeredByUserId?: string,
 ): Promise<SyncResult> {
   const startedAt = new Date();
 
   const syncRun = await prisma.googleSheetSyncRun.create({
     data: {
-      startedAt,
-      triggeredBy,
+      startedAt, triggeredBy, mode,
       triggeredByUserId: triggeredByUserId ?? null,
       status: "RUNNING",
     },
   });
 
-  let totalSheets = 0;
-  let sheetsSkipped = 0;
-  let totalRows = 0;
-  let importedCount = 0;
+  let totalSheets       = 0;
+  let sheetsSkipped     = 0;
+  let totalRows         = 0;
+  let importedCount     = 0;
+  let updatedCount      = 0;
+  let noChangeCount     = 0;
   let skippedEmptyCount = 0;
-  let duplicateCount = 0;
-  let failedCount = 0;
+  let duplicateCount    = 0;
+  let failedCount       = 0;
+  let deletedCount      = 0;
+
+  // All external IDs seen across every sheet — used for resync delete phase.
+  const allSeenExternalIds = new Set<string>();
 
   try {
     const spreadsheetId = process.env.GOOGLE_SHEETS_SPREADSHEET_ID;
     if (!spreadsheetId) throw new Error("GOOGLE_SHEETS_SPREADSHEET_ID غير مكوّن");
 
-    console.log(
-      `[GoogleSheetsImport] starting ${triggeredBy} sync (run id: ${syncRun.id})`
-    );
+    console.log(`[GoogleSheetsImport] starting ${triggeredBy} sync (mode: ${mode}, run id: ${syncRun.id})`);
 
     // ── 1. Discover all sheets ──────────────────────────────────────────────
     const sheetNames = await listSheets(spreadsheetId);
     totalSheets = sheetNames.length;
-    console.log(
-      `[GoogleSheetsImport] ${totalSheets} sheet(s) discovered: ${sheetNames.join(", ")}`
-    );
+    console.log(`[GoogleSheetsImport] ${totalSheets} sheet(s): ${sheetNames.join(", ")}`);
 
     if (totalSheets === 0) {
       const finishedAt = new Date();
       await prisma.googleSheetSyncRun.update({
         where: { id: syncRun.id },
-        data: { status: "COMPLETED", finishedAt, totalSheets: 0 },
+        data: { status: "COMPLETED", finishedAt, totalSheets: 0, mode },
       });
       return {
-        syncRunId: syncRun.id,
+        syncRunId: syncRun.id, mode,
         totalSheets: 0, sheetsSkipped: 0, totalRows: 0,
-        importedCount: 0, skippedEmptyCount: 0, duplicateCount: 0, failedCount: 0,
+        importedCount: 0, updatedCount: 0, noChangeCount: 0,
+        skippedEmptyCount: 0, duplicateCount: 0, failedCount: 0, deletedCount: 0,
         startedAt, finishedAt,
       };
     }
 
-    // ── 2. Load all DB lookup data (shared across every sheet) ─────────────
+    // ── 2. Load shared DB lookup data ──────────────────────────────────────
     const [
-      countries,
-      currencies,
-      paymentMethods,
-      products,
-      employees,
-      initialStatus,
-      existingLogs,
-      existingOrders,
+      countries, currencies, paymentMethods, products,
+      employees, initialStatus, existingLogs, existingOrders,
     ] = await Promise.all([
       prisma.country.findMany({ where: { deletedAt: null } }),
       prisma.currency.findMany({ where: { deletedAt: null } }),
@@ -197,45 +266,32 @@ export async function runGoogleSheetsImport(
         where: { spreadsheetId },
         select: { externalOrderId: true, status: true, systemOrderId: true },
       }),
+      // Active orders for duplicate phone detection
       prisma.order.findMany({
-        select: { customerName: true, phone: true },
+        where: { deletedAt: null },
+        select: { phone: true },
       }),
     ]);
 
-    if (!initialStatus) {
-      throw new Error("حالة 'جاهز للشحن' غير موجودة في إعدادات النظام");
-    }
+    if (!initialStatus) throw new Error("حالة 'جاهز للشحن' غير موجودة في إعدادات النظام");
 
-    // Case-insensitive entity maps
-    const countryByName = new Map(countries.map((c) => [lc(c.name), c]));
-    const countryByCode = new Map(countries.map((c) => [lc(c.code), c]));
+    const countryByName  = new Map(countries.map((c) => [lc(c.name), c]));
+    const countryByCode  = new Map(countries.map((c) => [lc(c.code), c]));
     const currencyByName = new Map(currencies.map((c) => [lc(c.name), c]));
     const currencyByCode = new Map(currencies.map((c) => [lc(c.code), c]));
-    const pmByName = new Map(paymentMethods.map((p) => [lc(p.name), p]));
-    const productByName = new Map(products.map((p) => [lc(p.name), p]));
-    const productBySku = new Map(
+    const pmByName       = new Map(paymentMethods.map((p) => [lc(p.name), p]));
+    const productByName  = new Map(products.map((p) => [lc(p.name), p]));
+    const productBySku   = new Map(
       products.filter((p) => p.sku).map((p) => [lc(p.sku!), p])
     );
-    const employeeByEmail = new Map(employees.map((e) => [lc(e.email), e]));
-    const importLogByExternalId = new Map(
-      existingLogs.map((l) => [l.externalOrderId, l])
-    );
+    const employeeByEmail       = new Map(employees.map((e) => [lc(e.email), e]));
+    const importLogByExternalId = new Map(existingLogs.map((l) => [l.externalOrderId, l]));
 
-    // Duplicate-customer detection sets — seeded with all existing orders,
-    // then extended as new orders are created during this run.
     const existingPhones = new Set(
       existingOrders.map((o) => normalizePhone(o.phone)).filter(Boolean)
     );
-    const existingNames = new Set(
-      existingOrders.map((o) => normalizeName(o.customerName)).filter(Boolean)
-    );
 
-    // Activity logs — fire-and-forget after all sheets are processed
-    const activityQueue: Array<{
-      userId: string;
-      orderId: string;
-      orderNumber: string;
-    }> = [];
+    const activityQueue: Array<{ userId: string; orderId: string; orderNumber: string }> = [];
 
     // ── 3. Loop through every sheet ────────────────────────────────────────
     for (const sheetName of sheetNames) {
@@ -246,96 +302,75 @@ export async function runGoogleSheetsImport(
 
         if (headers.length === 0) {
           sheetsSkipped++;
-          console.log(
-            `[GoogleSheetsImport] sheet "${sheetName}" skipped — empty or no header row`
-          );
+          console.log(`[GoogleSheetsImport] sheet "${sheetName}" skipped — no header`);
           continue;
         }
 
         const headerMap: HeaderMap = {};
-        headers.forEach((h, i) => {
-          if (h) headerMap[h] = i;
-        });
+        headers.forEach((h, i) => { if (h) headerMap[h] = i; });
 
-        // Write-back columns must all be present — otherwise skip this sheet
-        const syncStatusColIdx = headerMap[H_SYNC_STATUS];
+        const syncStatusColIdx    = headerMap[H_SYNC_STATUS];
         const systemOrderIdColIdx = headerMap[H_SYSTEM_ORDER_ID];
-        const errorMessageColIdx = headerMap[H_ERROR_MESSAGE];
+        const errorMessageColIdx  = headerMap[H_ERROR_MESSAGE];
 
-        if (
-          syncStatusColIdx === undefined ||
-          systemOrderIdColIdx === undefined ||
-          errorMessageColIdx === undefined
-        ) {
+        if (syncStatusColIdx === undefined || systemOrderIdColIdx === undefined || errorMessageColIdx === undefined) {
           sheetsSkipped++;
           const missing = [
-            syncStatusColIdx === undefined ? H_SYNC_STATUS : null,
+            syncStatusColIdx    === undefined ? H_SYNC_STATUS     : null,
             systemOrderIdColIdx === undefined ? H_SYSTEM_ORDER_ID : null,
-            errorMessageColIdx === undefined ? H_ERROR_MESSAGE : null,
-          ]
-            .filter(Boolean)
-            .join(", ");
-          console.log(
-            `[GoogleSheetsImport] sheet "${sheetName}" skipped — missing required columns: ${missing}`
-          );
+            errorMessageColIdx  === undefined ? H_ERROR_MESSAGE   : null,
+          ].filter(Boolean).join(", ");
+          console.log(`[GoogleSheetsImport] sheet "${sheetName}" skipped — missing: ${missing}`);
           continue;
         }
 
         if (rows.length === 0) {
-          console.log(
-            `[GoogleSheetsImport] sheet "${sheetName}" — no data rows, nothing to process`
-          );
+          console.log(`[GoogleSheetsImport] sheet "${sheetName}" — no data rows`);
           continue;
         }
 
-        // Only process rows not already marked Synced in the sheet itself
-        const candidateRows = rows.filter(
-          (r) => lc(getCell(r.values, headerMap, H_SYNC_STATUS)) !== "synced"
-        );
+        // ── Collect ALL external IDs from every row (for resync delete phase) ─
+        for (const row of rows) {
+          const extId = getCell(row.values, headerMap, H_EXTERNAL_ID);
+          if (extId) allSeenExternalIds.add(extId);
+        }
+
+        // ── Candidate filtering ────────────────────────────────────────────
+        // "update" mode: skip already-Synced rows (they already exist).
+        // "resync" mode: re-evaluate all rows including Synced ones.
+        const candidateRows = mode === "resync"
+          ? rows
+          : rows.filter((r) => lc(getCell(r.values, headerMap, H_SYNC_STATUS)) !== "synced");
+
         totalRows += candidateRows.length;
 
         console.log(
-          `[GoogleSheetsImport] sheet "${sheetName}" — ` +
-          `total rows: ${rows.length}, candidates: ${candidateRows.length}, ` +
-          `already synced in sheet: ${rows.length - candidateRows.length}`
+          `[GoogleSheetsImport] sheet "${sheetName}" (${mode}) — ` +
+          `total: ${rows.length}, candidates: ${candidateRows.length}, ` +
+          `skipped-synced: ${rows.length - candidateRows.length}`
         );
 
         const sheetWriteBacks: WriteBack[] = [];
 
         for (const row of candidateRows) {
           const { rowIndex, values } = row;
+          console.log("GOOGLE_SYNC_ROW_NUMBER", { sheet: sheetName, rowIndex, mode });
 
-          console.log("GOOGLE_SYNC_ROW_INDEX", { sheet: sheetName, rowIndex });
-
-          // ── Empty row guard — skip silently with no write-back ─────────
+          // ── A. Skip truly empty rows — no write-back at all ───────────
           if (isRowEmpty(values, headerMap)) {
-            console.log("GOOGLE_SYNC_ROW_EMPTY_SKIPPED", { sheet: sheetName, rowIndex });
+            console.log("GOOGLE_SYNC_EMPTY_ROW_SKIPPED", { sheet: sheetName, rowIndex });
             skippedEmptyCount++;
             continue;
           }
 
-          const externalOrderId = getCell(values, headerMap, H_EXTERNAL_ID);
+          const externalOrderId      = getCell(values, headerMap, H_EXTERNAL_ID);
+          const systemOrderIdInSheet = getCell(values, headerMap, H_SYSTEM_ORDER_ID);
 
-          // ── Duplicate guard via import log ─────────────────────────────
-          if (externalOrderId) {
-            const log = importLogByExternalId.get(externalOrderId);
-            if (log?.status === "SYNCED") {
-              console.log("GOOGLE_SYNC_ROW_WRITEBACK", { sheet: sheetName, rowIndex, status: "Synced (already in log)" });
-              sheetWriteBacks.push({
-                rowIndex,
-                syncStatus: "Synced",
-                systemOrderId: log.systemOrderId ?? "",
-                errorMessage: "",
-              });
-              continue;
-            }
-          }
-
-          // ── Validation ─────────────────────────────────────────────────
+          // ── B. Validate ────────────────────────────────────────────────
           const errs: string[] = [];
 
           const orderDateRaw = getCell(values, headerMap, H_ORDER_DATE);
-          const orderDate = orderDateRaw ? parseSheetOrderDate(orderDateRaw) : null;
+          const orderDate    = orderDateRaw ? parseSheetOrderDate(orderDateRaw) : null;
           if (!orderDateRaw || !orderDate) errs.push("تاريخ الطلب غير صالح");
 
           const customerName = getCell(values, headerMap, H_CUSTOMER_NAME);
@@ -345,225 +380,274 @@ export async function runGoogleSheetsImport(
           if (!phone) errs.push("Phone مطلوب");
 
           const countryName = getCell(values, headerMap, H_COUNTRY);
-          const country =
-            countryByName.get(lc(countryName)) ?? countryByCode.get(lc(countryName));
-          if (!countryName) errs.push("Country مطلوب");
+          const country = countryByName.get(lc(countryName)) ?? countryByCode.get(lc(countryName));
+          if (!countryName)  errs.push("Country مطلوب");
           else if (!country) errs.push(`الدولة غير موجودة: ${countryName}`);
 
           const productName = getCell(values, headerMap, H_PRODUCT);
-          const product =
-            productByName.get(lc(productName)) ?? productBySku.get(lc(productName));
-          if (!productName) errs.push("Product مطلوب");
+          const product = productByName.get(lc(productName)) ?? productBySku.get(lc(productName));
+          if (!productName)  errs.push("Product مطلوب");
           else if (!product) errs.push(`المنتج غير موجود: ${productName}`);
 
           const quantityRaw = getCell(values, headerMap, H_QUANTITY);
-          const quantity = parseInt(quantityRaw, 10);
-          if (!quantityRaw) errs.push("Quantity مطلوب");
-          else if (isNaN(quantity) || quantity < 1)
-            errs.push(`الكمية يجب أن تكون عدداً صحيحاً موجباً: ${quantityRaw}`);
+          const quantity    = parseInt(quantityRaw, 10);
+          if (!quantityRaw)                         errs.push("Quantity مطلوب");
+          else if (isNaN(quantity) || quantity < 1) errs.push(`كمية غير صحيحة: ${quantityRaw}`);
 
           const paidAmountRaw = getCell(values, headerMap, H_PAID_AMOUNT);
-          const paidAmount = parseFloat(paidAmountRaw);
-          if (!paidAmountRaw) errs.push("Paid Amount مطلوب");
-          else if (isNaN(paidAmount) || paidAmount < 0)
-            errs.push(`المبلغ غير صحيح: ${paidAmountRaw}`);
+          const paidAmount    = parseFloat(paidAmountRaw);
+          if (!paidAmountRaw)                          errs.push("Paid Amount مطلوب");
+          else if (isNaN(paidAmount) || paidAmount < 0) errs.push(`مبلغ غير صحيح: ${paidAmountRaw}`);
 
           const currencyName = getCell(values, headerMap, H_CURRENCY);
-          const currency =
-            currencyByName.get(lc(currencyName)) ?? currencyByCode.get(lc(currencyName));
-          if (!currencyName) errs.push("Currency مطلوب");
+          const currency = currencyByName.get(lc(currencyName)) ?? currencyByCode.get(lc(currencyName));
+          if (!currencyName)  errs.push("Currency مطلوب");
           else if (!currency) errs.push(`العملة غير موجودة: ${currencyName}`);
 
-          const pmName = getCell(values, headerMap, H_PAYMENT_METHOD);
+          const pmName        = getCell(values, headerMap, H_PAYMENT_METHOD);
           const paymentMethod = pmByName.get(lc(pmName));
-          if (!pmName) errs.push("Payment Method مطلوب");
+          if (!pmName)             errs.push("Payment Method مطلوب");
           else if (!paymentMethod) errs.push(`طريقة الدفع غير موجودة: ${pmName}`);
 
           const employeeEmail = getCell(values, headerMap, H_EMPLOYEE_EMAIL);
-          const employee = employeeByEmail.get(lc(employeeEmail));
+          const employee      = employeeByEmail.get(lc(employeeEmail));
           if (!employeeEmail) errs.push("Employee Email مطلوب");
-          else if (!employee) errs.push(`الموظف غير موجود أو غير نشط: ${employeeEmail}`);
+          else if (!employee) errs.push(`الموظف غير موجود: ${employeeEmail}`);
 
           const receiptUrls = [
             getCell(values, headerMap, H_RECEIPT_1),
             getCell(values, headerMap, H_RECEIPT_2),
             getCell(values, headerMap, H_RECEIPT_3),
           ].filter(Boolean);
-
           for (const url of receiptUrls) {
-            if (!isValidHttpUrl(url)) {
-              errs.push(`رابط إيصال غير صحيح: ${url.substring(0, 80)}`);
-            }
+            if (!isValidHttpUrl(url)) errs.push(`رابط إيصال غير صحيح: ${url.substring(0, 80)}`);
           }
 
           if (errs.length > 0) {
             const errorMessage = errs.join(" | ");
-            console.warn(
-              `GOOGLE_SYNC_ROW_VALID`, { valid: false, sheet: sheetName, rowIndex, errors: errorMessage }
-            );
+            console.warn("GOOGLE_SYNC_ROW_NUMBER", { valid: false, sheet: sheetName, rowIndex, errors: errorMessage });
             failedCount++;
-            console.log("GOOGLE_SYNC_ROW_WRITEBACK", { sheet: sheetName, rowIndex, status: "Failed" });
-            sheetWriteBacks.push({
-              rowIndex,
-              syncStatus: "Failed",
-              systemOrderId: "",
-              errorMessage,
-            });
+            sheetWriteBacks.push({ rowIndex, syncStatus: "Failed", systemOrderId: "", errorMessage });
             if (externalOrderId) {
-              prisma.googleSheetImportLog
-                .upsert({
-                  where: { externalOrderId },
-                  create: {
-                    externalOrderId, spreadsheetId, sheetName,
-                    rowNumber: rowIndex, status: "FAILED", errorMessage,
-                  },
-                  update: {
-                    rowNumber: rowIndex, sheetName, status: "FAILED", errorMessage,
-                  },
-                })
-                .catch(() => {});
+              prisma.googleSheetImportLog.upsert({
+                where: { externalOrderId },
+                create: { externalOrderId, spreadsheetId, sheetName, rowNumber: rowIndex, status: "FAILED", errorMessage },
+                update: { rowNumber: rowIndex, sheetName, status: "FAILED", errorMessage },
+              }).catch(() => {});
             }
             continue;
           }
 
-          console.log("GOOGLE_SYNC_ROW_VALID", { valid: true, sheet: sheetName, rowIndex });
-
-          // ── Duplicate customer check ───────────────────────────────────
-          // Only runs on valid non-empty rows; never runs on rows with blank name/phone.
-          const normPhone = normalizePhone(phone);
-          const normName = normalizeName(customerName);
-          const phoneMatches = normPhone.length > 0 && existingPhones.has(normPhone);
-          const nameMatches = normName.length > 0 && existingNames.has(normName);
-
-          if (phoneMatches || nameMatches) {
-            duplicateCount++;
-            const errorMessage =
-              phoneMatches && nameMatches
-                ? "طلب مكرر بسبب تطابق اسم العميل أو رقم الجوال"
-                : phoneMatches
-                ? "طلب مكرر بسبب تطابق رقم الجوال"
-                : "طلب مكرر بسبب تطابق اسم العميل";
-            console.warn(
-              `GOOGLE_SYNC_ROW_DUPLICATE`, {
-                sheet: sheetName, rowIndex,
-                name: customerName, phone,
-                phoneMatch: phoneMatches, nameMatch: nameMatches,
-              }
-            );
-            console.log("GOOGLE_SYNC_ROW_WRITEBACK", { sheet: sheetName, rowIndex, status: "Duplicate" });
-            sheetWriteBacks.push({
-              rowIndex,
-              syncStatus: "Duplicate",
-              systemOrderId: "",
-              errorMessage,
-            });
-            if (externalOrderId) {
-              prisma.googleSheetImportLog
-                .upsert({
-                  where: { externalOrderId },
-                  create: {
-                    externalOrderId, spreadsheetId, sheetName,
-                    rowNumber: rowIndex, status: "DUPLICATE", errorMessage,
-                  },
-                  update: {
-                    rowNumber: rowIndex, sheetName, status: "DUPLICATE", errorMessage,
-                  },
-                })
-                .catch(() => {});
-            }
-            continue;
-          }
-
-          // ── Create order ───────────────────────────────────────────────
-          const city = getCell(values, headerMap, H_CITY);
+          // ── C. Resolve derived fields ──────────────────────────────────
+          const city         = getCell(values, headerMap, H_CITY);
           const detailedAddr = getCell(values, headerMap, H_ADDRESS);
-          const address = city ? `${city}، ${detailedAddr}` : detailedAddr;
-          const notes = getCell(values, headerMap, H_NOTES) || null;
-          const unitPrice = quantity > 0 ? paidAmount / quantity : 0;
+          const address      = city ? `${city}، ${detailedAddr}` : detailedAddr;
+          const notes        = getCell(values, headerMap, H_NOTES) || null;
+          const unitPrice    = quantity > 0 ? paidAmount / quantity : 0;
 
+          const nextValues = {
+            customerName, phone, address,
+            countryId:       country!.id,
+            currencyId:      currency!.id,
+            paymentMethodId: paymentMethod!.id,
+            totalAmount:     paidAmount,
+            notes,
+            orderDate:       orderDate!,
+            productId:       product!.id,
+            quantity,
+          };
+
+          // ── D. Find existing order ─────────────────────────────────────
+          let existingOrder: ExistingOrder | null = null;
+
+          if (systemOrderIdInSheet) {
+            existingOrder = await prisma.order.findUnique({
+              where: { orderNumber: systemOrderIdInSheet },
+              select: ORDER_SELECT,
+            }) as ExistingOrder | null;
+          }
+
+          if (!existingOrder && externalOrderId) {
+            const log = importLogByExternalId.get(externalOrderId);
+            if (log?.status === "SYNCED" && log.systemOrderId) {
+              existingOrder = await prisma.order.findUnique({
+                where: { id: log.systemOrderId },
+                select: ORDER_SELECT,
+              }) as ExistingOrder | null;
+              // null here means order was hard-deleted → fall through to create
+            }
+          }
+
+          console.log("GOOGLE_SYNC_MATCH_FOUND", { sheet: sheetName, rowIndex, found: !!existingOrder });
+
+          // ── E. Existing order handling ─────────────────────────────────
+          if (existingOrder) {
+            if (mode === "update") {
+              // "update" mode never modifies existing orders
+              noChangeCount++;
+              console.log("GOOGLE_SYNC_NO_CHANGE", { sheet: sheetName, rowIndex, orderNumber: existingOrder.orderNumber, mode });
+              sheetWriteBacks.push({
+                rowIndex, syncStatus: "No Change",
+                systemOrderId: existingOrder.orderNumber, errorMessage: "",
+              });
+              continue;
+            }
+
+            // "resync" mode — update if changed, otherwise no-change
+            try {
+              if (hasOrderChanged(existingOrder, nextValues)) {
+                await prisma.$transaction(async (tx) => {
+                  // Never update statusId during resync
+                  await tx.order.update({
+                    where: { id: existingOrder!.id },
+                    data: {
+                      customerName, phone, address,
+                      countryId:       country!.id,
+                      currencyId:      currency!.id,
+                      paymentMethodId: paymentMethod!.id,
+                      totalAmount:     paidAmount,
+                      notes,
+                      orderDate:       orderDate!,
+                      // set externalOrderId if not already set
+                      ...(externalOrderId && { externalOrderId }),
+                    },
+                  });
+                  await tx.orderItem.deleteMany({ where: { orderId: existingOrder!.id } });
+                  await tx.orderItem.create({
+                    data: {
+                      orderId:    existingOrder!.id,
+                      productId:  product!.id,
+                      quantity, unitPrice,
+                      totalPrice: paidAmount,
+                    },
+                  });
+                  await tx.orderAuditLog.create({
+                    data: {
+                      orderId:     existingOrder!.id,
+                      action:      "UPDATE_ORDER",
+                      changedById: employee!.id,
+                      changedAt:   new Date(),
+                      newValue:    `Resync update | External ID: ${externalOrderId || "N/A"}`,
+                    },
+                  });
+                  if (externalOrderId) {
+                    await tx.googleSheetImportLog.upsert({
+                      where: { externalOrderId },
+                      create: {
+                        externalOrderId, spreadsheetId, sheetName,
+                        rowNumber: rowIndex, systemOrderId: existingOrder!.id,
+                        status: "SYNCED", importedAt: new Date(),
+                      },
+                      update: {
+                        rowNumber: rowIndex, sheetName,
+                        systemOrderId: existingOrder!.id,
+                        status: "SYNCED", errorMessage: null, importedAt: new Date(),
+                      },
+                    });
+                  }
+                });
+
+                updatedCount++;
+                const normPhone = normalizePhone(phone);
+                if (normPhone) existingPhones.add(normPhone);
+
+                console.log("GOOGLE_SYNC_UPDATED", { sheet: sheetName, rowIndex, orderNumber: existingOrder.orderNumber });
+                sheetWriteBacks.push({
+                  rowIndex, syncStatus: "Updated",
+                  systemOrderId: existingOrder.orderNumber, errorMessage: "",
+                });
+              } else {
+                noChangeCount++;
+                console.log("GOOGLE_SYNC_NO_CHANGE", { sheet: sheetName, rowIndex, orderNumber: existingOrder.orderNumber });
+                sheetWriteBacks.push({
+                  rowIndex, syncStatus: "No Change",
+                  systemOrderId: existingOrder.orderNumber, errorMessage: "",
+                });
+              }
+            } catch (err) {
+              const errorMessage = err instanceof Error ? err.message : "خطأ غير متوقع أثناء التحديث";
+              console.error("GOOGLE_SYNC_UPDATE_ERROR", { sheet: sheetName, rowIndex, error: errorMessage });
+              failedCount++;
+              sheetWriteBacks.push({ rowIndex, syncStatus: "Failed", systemOrderId: "", errorMessage });
+            }
+            continue;
+          }
+
+          // ── F. Duplicate check — phone only ────────────────────────────
+          const normPhone = normalizePhone(phone);
+          if (normPhone && existingPhones.has(normPhone)) {
+            duplicateCount++;
+            const errorMessage = "طلب مكرر بسبب رقم الجوال";
+            console.warn("GOOGLE_SYNC_DUPLICATE", { sheet: sheetName, rowIndex, phone });
+            sheetWriteBacks.push({ rowIndex, syncStatus: "Duplicate", systemOrderId: "", errorMessage });
+            if (externalOrderId) {
+              prisma.googleSheetImportLog.upsert({
+                where: { externalOrderId },
+                create: { externalOrderId, spreadsheetId, sheetName, rowNumber: rowIndex, status: "DUPLICATE", errorMessage },
+                update: { rowNumber: rowIndex, sheetName, status: "DUPLICATE", errorMessage },
+              }).catch(() => {});
+            }
+            continue;
+          }
+
+          // ── G. Create new order ────────────────────────────────────────
           try {
             const order = await prisma.$transaction(async (tx) => {
               const orderNumber = await generateOrderNumber(tx);
 
               const created = await tx.order.create({
                 data: {
-                  orderNumber,
-                  orderDate: orderDate!,
-                  customerName,
-                  phone,
-                  address,
-                  countryId: country!.id,
-                  currencyId: currency!.id,
+                  orderNumber, orderDate: orderDate!, customerName, phone, address,
+                  countryId:       country!.id,
+                  currencyId:      currency!.id,
                   paymentMethodId: paymentMethod!.id,
-                  statusId: initialStatus.id,
-                  totalAmount: paidAmount,
-                  notes,
-                  isRepeatCustomer: false,
-                  createdById: employee!.id,
-                  teamId: employee!.teamId ?? null,
+                  statusId:        initialStatus.id,
+                  totalAmount:     paidAmount,
+                  notes, isRepeatCustomer: false,
+                  createdById:     employee!.id,
+                  teamId:          employee!.teamId ?? null,
+                  source:          "GOOGLE_SHEETS",
+                  ...(externalOrderId && { externalOrderId }),
                   items: {
-                    create: [
-                      {
-                        productId: product!.id,
-                        quantity,
-                        unitPrice,
-                        totalPrice: paidAmount,
-                      },
-                    ],
+                    create: [{ productId: product!.id, quantity, unitPrice, totalPrice: paidAmount }],
                   },
                 },
               });
 
               await tx.orderAuditLog.create({
                 data: {
-                  orderId: created.id,
-                  action: "IMPORT_ORDER_SHEETS",
-                  changedById: employee!.id,
-                  changedAt: new Date(),
-                  newValue: `External Order ID: ${externalOrderId || "N/A"} | Sheet: ${sheetName}`,
+                  orderId: created.id, action: "IMPORT_ORDER_SHEETS",
+                  changedById: employee!.id, changedAt: new Date(),
+                  newValue: `External Order ID: ${externalOrderId || "N/A"} | Sheet: ${sheetName} | Mode: ${mode}`,
                 },
               });
 
               if (receiptUrls.length > 0) {
                 await tx.paymentReceipt.createMany({
                   data: receiptUrls.map((url) => ({
-                    orderId: created.id,
-                    url,
-                    mimeType: guessMime(url),
-                    size: 0,
-                    uploadedById: employee!.id,
+                    orderId: created.id, url, mimeType: guessMime(url),
+                    size: 0, uploadedById: employee!.id,
                   })),
                 });
                 await tx.orderAuditLog.create({
                   data: {
-                    orderId: created.id,
-                    action: "RECEIPT_UPLOADED",
-                    changedById: employee!.id,
-                    changedAt: new Date(),
+                    orderId: created.id, action: "RECEIPT_UPLOADED",
+                    changedById: employee!.id, changedAt: new Date(),
                   },
                 });
               }
 
-              // Only write to import log when externalOrderId is present
               if (externalOrderId) {
                 await tx.googleSheetImportLog.upsert({
                   where: { externalOrderId },
                   create: {
-                    externalOrderId,
-                    spreadsheetId,
-                    sheetName,
-                    rowNumber: rowIndex,
-                    systemOrderId: created.id,
-                    status: "SYNCED",
-                    importedAt: new Date(),
+                    externalOrderId, spreadsheetId, sheetName,
+                    rowNumber: rowIndex, systemOrderId: created.id,
+                    status: "SYNCED", importedAt: new Date(),
                   },
                   update: {
-                    rowNumber: rowIndex,
-                    sheetName,
-                    systemOrderId: created.id,
-                    status: "SYNCED",
-                    errorMessage: null,
-                    importedAt: new Date(),
+                    rowNumber: rowIndex, sheetName, systemOrderId: created.id,
+                    status: "SYNCED", errorMessage: null, importedAt: new Date(),
                   },
                 });
               }
@@ -571,52 +655,23 @@ export async function runGoogleSheetsImport(
               return created;
             });
 
-            // Order created successfully in DB — only NOW mark as Synced
             importedCount++;
             if (normPhone) existingPhones.add(normPhone);
-            if (normName) existingNames.add(normName);
 
-            console.log("GOOGLE_SYNC_ROW_CREATED", { sheet: sheetName, rowIndex, orderNumber: order.orderNumber });
-            console.log("GOOGLE_SYNC_ROW_WRITEBACK", { sheet: sheetName, rowIndex, status: "Synced", orderNumber: order.orderNumber });
-            sheetWriteBacks.push({
-              rowIndex,
-              syncStatus: "Synced",
-              systemOrderId: order.orderNumber,
-              errorMessage: "",
-            });
-            activityQueue.push({
-              userId: employee!.id,
-              orderId: order.id,
-              orderNumber: order.orderNumber,
-            });
+            console.log("GOOGLE_SYNC_CREATED", { sheet: sheetName, rowIndex, orderNumber: order.orderNumber });
+            sheetWriteBacks.push({ rowIndex, syncStatus: "Synced", systemOrderId: order.orderNumber, errorMessage: "" });
+            activityQueue.push({ userId: employee!.id, orderId: order.id, orderNumber: order.orderNumber });
           } catch (err) {
-            // DB insert failed — write Failed, never write Synced
-            const errorMessage =
-              err instanceof Error ? err.message : "خطأ غير متوقع أثناء إنشاء الطلب";
-            console.error(
-              `GOOGLE_SYNC_ROW_WRITEBACK`,
-              { sheet: sheetName, rowIndex, status: "Failed", error: errorMessage }
-            );
+            const errorMessage = err instanceof Error ? err.message : "خطأ غير متوقع أثناء إنشاء الطلب";
+            console.error("GOOGLE_SYNC_CREATE_ERROR", { sheet: sheetName, rowIndex, error: errorMessage });
             failedCount++;
-            sheetWriteBacks.push({
-              rowIndex,
-              syncStatus: "Failed",
-              systemOrderId: "",
-              errorMessage,
-            });
+            sheetWriteBacks.push({ rowIndex, syncStatus: "Failed", systemOrderId: "", errorMessage });
             if (externalOrderId) {
-              prisma.googleSheetImportLog
-                .upsert({
-                  where: { externalOrderId },
-                  create: {
-                    externalOrderId, spreadsheetId, sheetName,
-                    rowNumber: rowIndex, status: "FAILED", errorMessage,
-                  },
-                  update: {
-                    rowNumber: rowIndex, sheetName, status: "FAILED", errorMessage,
-                  },
-                })
-                .catch(() => {});
+              prisma.googleSheetImportLog.upsert({
+                where: { externalOrderId },
+                create: { externalOrderId, spreadsheetId, sheetName, rowNumber: rowIndex, status: "FAILED", errorMessage },
+                update: { rowNumber: rowIndex, sheetName, status: "FAILED", errorMessage },
+              }).catch(() => {});
             }
           }
         }
@@ -625,107 +680,110 @@ export async function runGoogleSheetsImport(
         if (sheetWriteBacks.length > 0) {
           try {
             await writeSheetResults(
-              spreadsheetId,
-              sheetName,
-              sheetWriteBacks,
-              syncStatusColIdx,
-              systemOrderIdColIdx,
-              errorMessageColIdx
+              spreadsheetId, sheetName, sheetWriteBacks,
+              syncStatusColIdx, systemOrderIdColIdx, errorMessageColIdx
             );
           } catch (err) {
-            console.error(
-              `[GoogleSheetsImport] write-back to sheet "${sheetName}" failed:`,
-              err
-            );
+            console.error(`[GoogleSheetsImport] write-back to "${sheetName}" failed:`, err);
           }
         }
       } catch (sheetErr) {
-        // A fatal read error on one sheet must not abort the rest.
         sheetsSkipped++;
-        console.error(
-          `[GoogleSheetsImport] error processing sheet "${sheetName}" — skipping:`,
-          sheetErr
-        );
+        console.error(`[GoogleSheetsImport] error on sheet "${sheetName}" — skipping:`, sheetErr);
       }
     }
 
-    // ── 4. Activity logs — fire-and-forget ─────────────────────────────────
+    // ── 4. Resync delete phase ─────────────────────────────────────────────
+    if (mode === "resync" && allSeenExternalIds.size > 0) {
+      console.log(`[GoogleSheetsImport] resync delete phase — seen ${allSeenExternalIds.size} external IDs`);
+      try {
+        // Find orders that came from Google Sheets but are no longer in any sheet
+        const toDelete = await prisma.order.findMany({
+          where: {
+            source: "GOOGLE_SHEETS",
+            externalOrderId: { not: null, notIn: Array.from(allSeenExternalIds) },
+            deletedAt: null,
+          },
+          select: { id: true, orderNumber: true, externalOrderId: true },
+        });
+
+        console.log(`[GoogleSheetsImport] resync delete phase — ${toDelete.length} orders to hard-delete`);
+
+        for (const ord of toDelete) {
+          try {
+            await prisma.$transaction(async (tx) => {
+              await tx.order.delete({ where: { id: ord.id } });
+              if (ord.externalOrderId) {
+                await tx.googleSheetImportLog.updateMany({
+                  where: { systemOrderId: ord.id },
+                  data: { status: "DELETED", systemOrderId: null },
+                });
+              }
+            });
+            deletedCount++;
+            console.log("GOOGLE_SYNC_DELETED", { orderNumber: ord.orderNumber, externalOrderId: ord.externalOrderId });
+          } catch (err) {
+            console.error("GOOGLE_SYNC_DELETE_ERROR", { orderNumber: ord.orderNumber, error: err instanceof Error ? err.message : String(err) });
+          }
+        }
+      } catch (err) {
+        console.error("[GoogleSheetsImport] resync delete phase failed:", err);
+      }
+    } else if (mode === "resync") {
+      // allSeenExternalIds is empty — no sheets had any external IDs, skip delete to be safe
+      console.log("[GoogleSheetsImport] resync delete phase skipped — no external IDs found in sheets");
+    }
+
+    // ── 5. Activity logs ───────────────────────────────────────────────────
     if (activityQueue.length > 0) {
       prisma.activityLog
         .createMany({
           data: activityQueue.map(({ userId, orderId, orderNumber }) => ({
-            userId,
-            action: "IMPORT_ORDER_SHEETS",
-            entityType: "Order",
-            entityId: orderId,
-            details: { orderNumber, source: "google_sheets" } as Prisma.InputJsonValue,
+            userId, action: "IMPORT_ORDERS", entityType: "Order", entityId: orderId,
+            details: { orderNumber, source: "google_sheets", mode } as Prisma.InputJsonValue,
           })),
         })
-        .catch((err) =>
-          console.error("[GoogleSheetsImport] activity log batch failed:", err)
-        );
+        .catch((err) => console.error("[GoogleSheetsImport] activity log batch failed:", err));
     }
 
-    // ── 5. Finalise sync run ───────────────────────────────────────────────
-    const finishedAt = new Date();
-    const durationSec = (
-      (finishedAt.getTime() - startedAt.getTime()) / 1000
-    ).toFixed(1);
-    console.log(
-      `[GoogleSheetsImport] sync COMPLETED in ${durationSec}s — ` +
-      `sheets: ${totalSheets} (skipped: ${sheetsSkipped}) | ` +
-      `rows: ${totalRows} | imported: ${importedCount} | ` +
-      `duplicates: ${duplicateCount} | emptySkipped: ${skippedEmptyCount} | failed: ${failedCount}`
-    );
-    console.log("GOOGLE_SYNC_IMPORTED_COUNT", importedCount);
-    console.log("GOOGLE_SYNC_DUPLICATE_COUNT", duplicateCount);
-    console.log("GOOGLE_SYNC_EMPTY_SKIPPED_COUNT", skippedEmptyCount);
-    console.log("GOOGLE_SYNC_FAILED_COUNT", failedCount);
+    // ── 6. Finalise sync run ───────────────────────────────────────────────
+    const finishedAt  = new Date();
+    const durationSec = ((finishedAt.getTime() - startedAt.getTime()) / 1000).toFixed(1);
+
+    console.log("GOOGLE_SYNC_SUMMARY", {
+      mode, durationSec, totalSheets, sheetsSkipped, totalRows,
+      importedCount, updatedCount, noChangeCount,
+      skippedEmptyCount, duplicateCount, failedCount, deletedCount,
+    });
 
     await prisma.googleSheetSyncRun.update({
       where: { id: syncRun.id },
       data: {
-        status: "COMPLETED",
-        finishedAt,
-        totalSheets,
-        sheetsSkipped,
-        totalRows,
-        importedCount,
-        skippedCount: skippedEmptyCount, // DB column reused for empty-row skips
-        duplicateCount,
-        failedCount,
+        status: "COMPLETED", finishedAt, mode,
+        totalSheets, sheetsSkipped, totalRows,
+        importedCount, updatedCount, noChangeCount,
+        skippedCount: skippedEmptyCount, duplicateCount, failedCount, deletedCount,
       },
     });
 
     return {
-      syncRunId: syncRun.id,
-      totalSheets,
-      sheetsSkipped,
-      totalRows,
-      importedCount,
-      skippedEmptyCount,
-      duplicateCount,
-      failedCount,
-      startedAt,
-      finishedAt,
+      syncRunId: syncRun.id, mode, totalSheets, sheetsSkipped, totalRows,
+      importedCount, updatedCount, noChangeCount,
+      skippedEmptyCount, duplicateCount, failedCount, deletedCount,
+      startedAt, finishedAt,
     };
   } catch (err) {
     console.error("[GoogleSheetsImport] fatal error:", err);
-    const finishedAt = new Date();
+    const finishedAt   = new Date();
     const errorSummary = err instanceof Error ? err.message : "خطأ غير متوقع";
     await prisma.googleSheetSyncRun
       .update({
         where: { id: syncRun.id },
         data: {
-          status: "FAILED",
-          finishedAt,
-          totalSheets,
-          sheetsSkipped,
-          totalRows,
-          importedCount,
-          skippedCount: skippedEmptyCount,
-          duplicateCount,
-          failedCount,
+          status: "FAILED", finishedAt, mode,
+          totalSheets, sheetsSkipped, totalRows,
+          importedCount, updatedCount, noChangeCount,
+          skippedCount: skippedEmptyCount, duplicateCount, failedCount, deletedCount,
           errorSummary,
         },
       })

@@ -66,6 +66,8 @@ model Order {
   paymentReceiptMime       String?
   paymentReceiptUploadedAt DateTime?
   paymentReceiptUrl        String?
+  source                   String                @default("MANUAL")
+  externalOrderId          String?               @unique
   followUpNotes            FollowUpNote[]
   notifications            Notification[]
   country                  Country               @relation(fields: [countryId], references: [id])
@@ -80,6 +82,8 @@ model Order {
   shippingInfo             ShippingInfo?
 
   @@index([deletedAt])
+  @@index([source])
+  @@index([externalOrderId])
   @@index([statusId])
   @@index([teamId])
   @@index([createdById])
@@ -416,10 +420,14 @@ model GoogleSheetSyncRun {
   totalSheets       Int       @default(0)
   sheetsSkipped     Int       @default(0)
   totalRows         Int       @default(0)
+  mode              String    @default("update")
   importedCount     Int       @default(0)
+  updatedCount      Int       @default(0)
+  noChangeCount     Int       @default(0)
   skippedCount      Int       @default(0)
   duplicateCount    Int       @default(0)
   failedCount       Int       @default(0)
+  deletedCount      Int       @default(0)
   errorSummary      String?
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt

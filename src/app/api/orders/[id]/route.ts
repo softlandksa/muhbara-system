@@ -141,7 +141,17 @@ export async function DELETE(
   });
   if (!order) return NextResponse.json({ error: "الطلب غير موجود" }, { status: 404 });
 
-  await prisma.order.update({ where: { id }, data: { deletedAt: new Date() } });
+  // Hard delete — cascades OrderItem, OrderAuditLog, ShippingInfo, FollowUpNote,
+  // PaymentReceipt (all have onDelete: Cascade). Notification.relatedOrderId is
+  // nullable and is set null automatically by DB default (SetNull).
+  await prisma.$transaction(async (tx) => {
+    await tx.order.delete({ where: { id } });
+    // Reset import log so this row can be re-imported from Google Sheets.
+    await tx.googleSheetImportLog.updateMany({
+      where: { systemOrderId: id },
+      data: { status: "DELETED", systemOrderId: null },
+    });
+  });
 
   // Fire-and-forget: clean up all receipt blobs so storage doesn't accumulate orphans.
   const blobUrls = [

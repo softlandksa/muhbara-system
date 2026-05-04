@@ -380,10 +380,34 @@ export async function PATCH(request: NextRequest) {
 
   if (action === "delete") {
     if (role !== "ADMIN") return NextResponse.json({ error: "ممنوع" }, { status: 403 });
-    await prisma.order.updateMany({
-      where: { id: { in: targetIds }, deletedAt: null },
-      data: { deletedAt: new Date() },
+
+    // Collect blob URLs before deletion (PaymentReceipt rows are cascade-deleted by DB)
+    const withReceipts = await prisma.order.findMany({
+      where: { id: { in: targetIds } },
+      select: { id: true, paymentReceiptUrl: true, receipts: { select: { url: true } } },
     });
+
+    // Hard delete — DB cascade handles OrderItem, OrderAuditLog, ShippingInfo,
+    // FollowUpNote, PaymentReceipt. Notification.relatedOrderId is set null by DB.
+    await prisma.$transaction(async (tx) => {
+      await tx.order.deleteMany({ where: { id: { in: targetIds } } });
+      await tx.googleSheetImportLog.updateMany({
+        where: { systemOrderId: { in: targetIds } },
+        data: { status: "DELETED", systemOrderId: null },
+      });
+    });
+
+    // Fire-and-forget blob cleanup
+    const blobUrls = withReceipts.flatMap((o) => [
+      ...(o.receipts?.map((r) => r.url) ?? []),
+      o.paymentReceiptUrl,
+    ]).filter((url): url is string => url != null && !url.startsWith("local://"));
+    blobUrls.forEach((url) =>
+      deleteFile(url).catch((e) =>
+        console.error("[PATCH /api/orders delete] blob cleanup failed:", e)
+      )
+    );
+
     return NextResponse.json({ data: { affected: targetIds.length } });
   }
 

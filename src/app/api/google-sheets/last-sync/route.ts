@@ -22,13 +22,17 @@ export async function GET() {
       id: true,
       finishedAt: true,
       status: true,
+      mode: true,
       totalSheets: true,
       sheetsSkipped: true,
       totalRows: true,
       importedCount: true,
+      updatedCount: true,
+      noChangeCount: true,
       skippedCount: true,
       duplicateCount: true,
       failedCount: true,
+      deletedCount: true,
       triggeredBy: true,
       triggeredByUserId: true,
       errorSummary: true,
@@ -50,4 +54,5 @@ export async function GET() {
   return NextResponse.json({
     data: { ...rest, skippedEmptyCount: skippedCount, updatedBy },
   });
+
 }

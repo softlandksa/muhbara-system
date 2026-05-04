@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { runGoogleSheetsImport } from "@/lib/google-sheets-import";
 
+
 /**
  * Vercel Cron endpoint — called every 12 hours.
  * Protected by GOOGLE_SHEETS_SYNC_SECRET (or Vercel's CRON_SECRET).
@@ -51,12 +52,13 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const result = await runGoogleSheetsImport("CRON");
+    const result = await runGoogleSheetsImport("CRON", "update");
     console.log(
       `[cron/google-sheets-sync] completed — ` +
-      `sheets:${result.totalSheets} (skipped:${result.sheetsSkipped}) ` +
+      `mode:${result.mode} sheets:${result.totalSheets} (skipped:${result.sheetsSkipped}) ` +
       `rows:${result.totalRows} imported:${result.importedCount} ` +
-      `duplicates:${result.duplicateCount} emptySkipped:${result.skippedEmptyCount} failed:${result.failedCount}`
+      `noChange:${result.noChangeCount} duplicates:${result.duplicateCount} ` +
+      `emptySkipped:${result.skippedEmptyCount} failed:${result.failedCount}`
     );
     return NextResponse.json({ data: result });
   } catch (err) {

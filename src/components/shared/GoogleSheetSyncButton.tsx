@@ -3,17 +3,17 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
-import { RefreshCw, RotateCcw, Loader2, Clock, User, Mail, Shield, CalendarDays, Timer, AlertTriangle } from "lucide-react";
+import {
+  RefreshCw, RotateCcw, Loader2,
+  Clock, User, Mail, Shield, CalendarDays, Timer, AlertTriangle,
+} from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { ROLE_LABELS } from "@/lib/permissions";
 import type { Role } from "@/types";
 import { SyncSummaryModal, type SyncSummaryData } from "@/components/shared/SyncSummaryModal";
 import {
-  Tooltip,
-  TooltipTrigger,
-  TooltipContent,
-  TooltipProvider,
+  Tooltip, TooltipTrigger, TooltipContent, TooltipProvider,
 } from "@/components/ui/tooltip";
 
 // ─── Arabic date helpers ──────────────────────────────────────────────────────
@@ -49,30 +49,16 @@ function formatTime(date: Date): string {
 
 type UpdatedBy = { name: string; email: string; role: string };
 
-type LastSyncInfo = {
+type SyncEntry = {
   id: string;
-  finishedAt: string;
+  finishedAt: string | null;
   status: string;
-  mode: string;
-  totalSheets: number;
-  sheetsSkipped: number;
-  totalRows: number;
-  importedCount: number;
-  updatedCount: number;
-  noChangeCount: number;
-  skippedEmptyCount: number;
-  duplicateCount: number;
-  failedCount: number;
-  deletedCount: number;
   triggeredBy: string;
-  updatedBy: UpdatedBy | null;
   errorSummary: string | null;
+  updatedBy: UpdatedBy | null;
 } | null;
 
 type SyncResultData = {
-  totalSheets: number;
-  sheetsSkipped: number;
-  totalRows: number;
   importedCount: number;
   updatedCount: number;
   noChangeCount: number;
@@ -103,16 +89,13 @@ function ResyncConfirmModal({
       onClick={(e) => { if (e.target === e.currentTarget) onCancel(); }}
     >
       <div dir="rtl" className="w-full max-w-sm rounded-2xl bg-white shadow-2xl ring-1 ring-black/5 overflow-hidden">
-        {/* Header */}
         <div className="px-5 pt-5 pb-4 flex items-start gap-3">
           <div className="shrink-0 h-10 w-10 rounded-full bg-red-100 flex items-center justify-center mt-0.5">
             <AlertTriangle className="h-5 w-5 text-red-600" />
           </div>
           <div>
             <p className="text-sm font-bold text-gray-900">تأكيد إعادة المزامنة الكاملة</p>
-            <p className="mt-1 text-xs text-gray-500 leading-relaxed">
-              ستقوم هذه العملية بـ:
-            </p>
+            <p className="mt-1 text-xs text-gray-500">ستقوم هذه العملية بـ:</p>
             <ul className="mt-1.5 text-xs text-gray-600 space-y-1">
               <li className="flex items-center gap-1.5">
                 <span className="h-1.5 w-1.5 rounded-full bg-blue-500 shrink-0" />
@@ -125,17 +108,13 @@ function ResyncConfirmModal({
               <li className="flex items-center gap-1.5">
                 <span className="h-1.5 w-1.5 rounded-full bg-red-500 shrink-0" />
                 <span className="text-red-600 font-medium">
-                  حذف الطلبات المستوردة من الجدول التي لم تعد موجودة فيه
+                  حذف الطلبات المستوردة التي لم تعد موجودة في الجدول
                 </span>
               </li>
             </ul>
-            <p className="mt-2 text-xs text-red-600 font-medium">
-              لا يمكن التراجع عن الحذف.
-            </p>
+            <p className="mt-2 text-xs text-red-600 font-medium">لا يمكن التراجع عن الحذف.</p>
           </div>
         </div>
-
-        {/* Actions */}
         <div className="px-5 pb-5 flex gap-2 justify-end">
           <button
             onClick={onCancel}
@@ -155,7 +134,151 @@ function ResyncConfirmModal({
   );
 }
 
-// ─── Component ────────────────────────────────────────────────────────────────
+// ─── Tooltip content shared between both cards ────────────────────────────────
+
+function SyncTooltipContent({
+  syncInfo,
+  finishedAt,
+}: {
+  syncInfo: SyncEntry;
+  finishedAt: Date;
+}) {
+  const isCron = syncInfo?.triggeredBy === "CRON";
+  return (
+    <div dir="rtl" className="flex flex-col text-xs w-full">
+      {syncInfo?.updatedBy ? (
+        <div className="flex flex-col gap-1.5 px-3 pt-2.5 pb-2">
+          <div className="flex items-center gap-2">
+            <User className="h-3 w-3 opacity-60 shrink-0" />
+            <span className="font-semibold">{syncInfo.updatedBy.name}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Mail className="h-3 w-3 opacity-60 shrink-0" />
+            <span dir="ltr" className="opacity-80">{syncInfo.updatedBy.email}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Shield className="h-3 w-3 opacity-60 shrink-0" />
+            <span className="opacity-80">
+              {ROLE_LABELS[syncInfo.updatedBy.role as Role] ?? syncInfo.updatedBy.role}
+            </span>
+          </div>
+        </div>
+      ) : isCron ? (
+        <div className="flex items-center gap-2 px-3 pt-2.5 pb-2">
+          <RefreshCw className="h-3 w-3 opacity-60 shrink-0" />
+          <span className="font-semibold">جدولة تلقائية</span>
+        </div>
+      ) : null}
+
+      <div className="h-px bg-border" />
+
+      <div className="flex flex-col gap-1.5 px-3 pt-2 pb-2.5">
+        <div className="flex items-center gap-2">
+          <CalendarDays className="h-3 w-3 opacity-60 shrink-0" />
+          <span className="opacity-80">{formatDate(finishedAt)}</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <Timer className="h-3 w-3 opacity-60 shrink-0" />
+          <span className="opacity-80">{formatTime(finishedAt)}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Individual sync card ─────────────────────────────────────────────────────
+
+type SyncCardProps = {
+  label: string;
+  runningLabel: string;
+  icon: React.ReactNode;
+  accentColor: "green" | "red";
+  statusLabel: string;
+  syncInfo: SyncEntry;
+  isRunning: boolean;
+  disabled: boolean;
+  onSync: () => void;
+};
+
+function SyncCard({
+  label, runningLabel, icon, accentColor, statusLabel,
+  syncInfo, isRunning, disabled, onSync,
+}: SyncCardProps) {
+  const finishedAt = syncInfo?.finishedAt ? new Date(syncInfo.finishedAt) : null;
+  const isCron     = syncInfo?.triggeredBy === "CRON";
+  const byLabel    = syncInfo?.updatedBy?.name ?? (isCron ? "جدولة تلقائية" : null);
+  const hasFailed  = syncInfo?.status === "FAILED";
+  const isGreen    = accentColor === "green";
+
+  return (
+    <div
+      dir="rtl"
+      className="flex flex-col gap-3 rounded-2xl bg-white border border-gray-100 shadow-sm p-4 min-w-[190px]"
+    >
+      {/* ── Button ── */}
+      <button
+        type="button"
+        onClick={onSync}
+        disabled={disabled}
+        className={cn(
+          "w-full inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl",
+          "text-sm font-semibold text-white",
+          "transition-all duration-200 ease-out",
+          "active:scale-95",
+          isGreen
+            ? "bg-green-600"
+            : "bg-red-600",
+          !disabled && isGreen && "hover:bg-green-500 hover:scale-105 hover:shadow-lg hover:shadow-green-500/40",
+          !disabled && !isGreen && "hover:bg-red-500 hover:scale-105 hover:shadow-lg hover:shadow-red-500/40",
+          disabled && "opacity-60 cursor-not-allowed",
+        )}
+      >
+        {isRunning
+          ? <Loader2 className="h-4 w-4 animate-spin shrink-0" />
+          : icon}
+        <span>{isRunning ? runningLabel : label}</span>
+      </button>
+
+      {/* ── Status ── */}
+      {finishedAt && byLabel ? (
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger
+              className="flex flex-col items-start gap-0.5 cursor-default select-none bg-transparent border-0 p-0 text-start w-full"
+            >
+              <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <Clock className="h-3 w-3 shrink-0 opacity-70" />
+                <span>{statusLabel}: {formatRelative(finishedAt)}</span>
+              </span>
+              <span className="text-[11px] text-gray-500 ps-[18px]">
+                بواسطة: {byLabel}
+              </span>
+              {hasFailed && (
+                <span className="text-[10px] font-medium text-red-500 ps-[18px]">
+                  فشلت المزامنة الأخيرة
+                </span>
+              )}
+            </TooltipTrigger>
+
+            <TooltipContent
+              side="bottom"
+              align="end"
+              className="p-0 max-w-72 overflow-hidden"
+            >
+              <SyncTooltipContent syncInfo={syncInfo} finishedAt={finishedAt} />
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      ) : (
+        <span className="text-[11px] text-gray-400">
+          لا توجد مزامنة سابقة
+        </span>
+      )}
+    </div>
+  );
+}
+
+// ─── Main component ───────────────────────────────────────────────────────────
 
 const RESYNC_ROLES: Role[] = ["ADMIN", "GENERAL_MANAGER"];
 
@@ -164,27 +287,25 @@ export function GoogleSheetSyncButton({
 }: {
   onSyncDone?: () => void;
 }) {
-  const [syncing, setSyncing]           = useState(false);
-  const [activeMode, setActiveMode]     = useState<"update" | "resync" | null>(null);
-  const [showConfirm, setShowConfirm]   = useState(false);
-  const [summary, setSummary]           = useState<SyncSummaryData | null>(null);
-  const queryClient                     = useQueryClient();
-  const { data: session }               = useSession();
+  const [syncing, setSyncing]         = useState(false);
+  const [activeMode, setActiveMode]   = useState<"update" | "resync" | null>(null);
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [summary, setSummary]         = useState<SyncSummaryData | null>(null);
+  const queryClient                   = useQueryClient();
+  const { data: session }             = useSession();
 
   const userRole  = session?.user?.role as Role | undefined;
   const canResync = userRole ? RESYNC_ROLES.includes(userRole) : false;
 
-  const { data } = useQuery<{ data: LastSyncInfo }>({
+  const { data } = useQuery<{ update: SyncEntry; resync: SyncEntry }>({
     queryKey: ["google-sheets-last-sync"],
     queryFn: () => fetch("/api/google-sheets/last-sync").then((r) => r.json()),
     staleTime: 30_000,
     refetchInterval: 60_000,
   });
 
-  const last       = data?.data;
-  const finishedAt = last?.finishedAt ? new Date(last.finishedAt) : null;
-  const isCron     = last?.triggeredBy === "CRON";
-  const byLabel    = last?.updatedBy?.name ?? (isCron ? "جدولة تلقائية" : null);
+  const updateInfo = data?.update ?? null;
+  const resyncInfo = data?.resync ?? null;
 
   async function handleSync(mode: "update" | "resync") {
     if (syncing) return;
@@ -197,19 +318,17 @@ export function GoogleSheetSyncButton({
         body: JSON.stringify({ mode }),
       });
 
-      // Read as text first so a non-JSON crash response is handled gracefully
-      const text = await res.text();
+      const text  = await res.text();
       let json: SyncResponse = {};
-      const isJson = res.headers.get("content-type")?.includes("application/json");
-      if (isJson || text.trimStart().startsWith("{")) {
+      const looksJson = res.headers.get("content-type")?.includes("application/json")
+        || text.trimStart().startsWith("{");
+      if (looksJson) {
         try { json = JSON.parse(text); } catch { /* fall through */ }
       }
 
       if (!res.ok) {
-        if (json.debug) console.error("[GoogleSheetSync] server debug:", json.debug);
-        if (!isJson && !text.trimStart().startsWith("{")) {
-          console.error("[GoogleSheetSync] non-JSON response", res.status, text.slice(0, 300));
-        }
+        if (json.debug) console.error("[GoogleSheetSync] debug:", json.debug);
+        if (!looksJson) console.error("[GoogleSheetSync] non-JSON", res.status, text.slice(0, 300));
         toast.error(json.error ?? `فشل التحديث — خطأ ${res.status}`);
         return;
       }
@@ -234,162 +353,53 @@ export function GoogleSheetSyncButton({
       await queryClient.invalidateQueries({ queryKey: ["google-sheets-last-sync"] });
       onSyncDone?.();
     } catch (err) {
-      console.error("[GoogleSheetSync] fetch error:", err);
-      toast.error("تعذر الاتصال بالخادم — يرجى المحاولة مرة أخرى");
+      console.error("[GoogleSheetSync] network error:", err);
+      toast.error("تعذر الاتصال بالخادم — تحقق من اتصالك");
     } finally {
       setSyncing(false);
       setActiveMode(null);
     }
   }
 
-  const isUpdating = syncing && activeMode === "update";
-  const isResyncing = syncing && activeMode === "resync";
-
   return (
     <>
       {summary && (
         <SyncSummaryModal data={summary} onClose={() => setSummary(null)} />
       )}
-
       {showConfirm && (
         <ResyncConfirmModal
-          onConfirm={() => {
-            setShowConfirm(false);
-            handleSync("resync");
-          }}
+          onConfirm={() => { setShowConfirm(false); handleSync("resync"); }}
           onCancel={() => setShowConfirm(false)}
         />
       )}
 
-      <div className="flex items-center gap-3">
+      {/* ── Two independent cards, side by side ─────────────────────────── */}
+      <div className="flex flex-wrap gap-4 items-start">
 
-        {/* ── Green update button ─────────────────────────────────────────────── */}
-        <button
-          type="button"
-          onClick={() => handleSync("update")}
+        <SyncCard
+          label="تحديث البيانات"
+          runningLabel="جاري التحديث..."
+          icon={<RefreshCw className="h-4 w-4 shrink-0" />}
+          accentColor="green"
+          statusLabel="آخر تحديث"
+          syncInfo={updateInfo}
+          isRunning={syncing && activeMode === "update"}
           disabled={syncing}
-          title="إضافة الطلبات الجديدة من Google Sheets"
-          className={cn(
-            "relative inline-flex items-center gap-2 px-4 py-2 rounded-xl",
-            "text-sm font-semibold text-white",
-            "bg-green-700",
-            "shadow-md shadow-green-900/30",
-            "hover:bg-green-600 hover:shadow-lg hover:shadow-green-500/40 hover:scale-[1.06]",
-            "active:scale-[0.96]",
-            "transition-all duration-200 ease-out",
-            "disabled:opacity-60 disabled:cursor-not-allowed",
-            "disabled:hover:scale-100 disabled:hover:bg-green-700 disabled:hover:shadow-md disabled:hover:shadow-green-900/30",
-          )}
-        >
-          {isUpdating ? (
-            <Loader2 className="h-4 w-4 animate-spin shrink-0" />
-          ) : (
-            <RefreshCw className="h-4 w-4 shrink-0" />
-          )}
-          <span>{isUpdating ? "جاري التحديث..." : "تحديث البيانات"}</span>
-        </button>
+          onSync={() => handleSync("update")}
+        />
 
-        {/* ── Red resync button (admin/general-manager only) ───────────────────── */}
         {canResync && (
-          <button
-            type="button"
-            onClick={() => setShowConfirm(true)}
+          <SyncCard
+            label="إعادة المزامنة"
+            runningLabel="جاري إعادة المزامنة..."
+            icon={<RotateCcw className="h-4 w-4 shrink-0" />}
+            accentColor="red"
+            statusLabel="آخر إعادة مزامنة"
+            syncInfo={resyncInfo}
+            isRunning={syncing && activeMode === "resync"}
             disabled={syncing}
-            title="مزامنة كاملة: تحديث + حذف الطلبات المحذوفة من الجدول"
-            className={cn(
-              "relative inline-flex items-center gap-2 px-4 py-2 rounded-xl",
-              "text-sm font-semibold text-white",
-              "bg-red-700",
-              "shadow-md shadow-red-900/30",
-              "hover:bg-red-600 hover:shadow-lg hover:shadow-red-500/40 hover:scale-[1.06]",
-              "active:scale-[0.96]",
-              "transition-all duration-200 ease-out",
-              "disabled:opacity-60 disabled:cursor-not-allowed",
-              "disabled:hover:scale-100 disabled:hover:bg-red-700 disabled:hover:shadow-md disabled:hover:shadow-red-900/30",
-            )}
-          >
-            {isResyncing ? (
-              <Loader2 className="h-4 w-4 animate-spin shrink-0" />
-            ) : (
-              <RotateCcw className="h-4 w-4 shrink-0" />
-            )}
-            <span>{isResyncing ? "جاري إعادة المزامنة..." : "إعادة المزامنة"}</span>
-          </button>
-        )}
-
-        {/* ── Last sync info + tooltip ─────────────────────────────────────────── */}
-        {finishedAt && byLabel && (
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger
-                dir="rtl"
-                className="hidden md:flex flex-col items-start cursor-default select-none bg-transparent border-0 p-0 m-0 text-start space-y-1"
-              >
-                <span className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-                  <Clock className="h-3 w-3 shrink-0" />
-                  <span>تم التحديث منذ: {formatRelative(finishedAt)}</span>
-                </span>
-                <span className="text-[11px] text-gray-500 pe-0.5">
-                  بواسطة: {byLabel}
-                </span>
-                {last?.status === "FAILED" && (
-                  <span className="text-[10px] font-medium text-red-500">
-                    فشلت المزامنة الأخيرة
-                  </span>
-                )}
-              </TooltipTrigger>
-
-              <TooltipContent
-                side="bottom"
-                align="end"
-                className="flex-col items-start gap-0 p-0 max-w-72 overflow-hidden"
-              >
-                <div dir="rtl" className="flex flex-col gap-0 text-xs w-full">
-
-                  {/* User info block */}
-                  {last?.updatedBy ? (
-                    <div className="flex flex-col gap-1.5 px-3 pt-2.5 pb-2">
-                      <div className="flex items-center gap-2">
-                        <User className="h-3 w-3 opacity-60 shrink-0" />
-                        <span className="font-semibold">{last.updatedBy.name}</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Mail className="h-3 w-3 opacity-60 shrink-0" />
-                        <span dir="ltr" className="opacity-80">{last.updatedBy.email}</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Shield className="h-3 w-3 opacity-60 shrink-0" />
-                        <span className="opacity-80">
-                          {ROLE_LABELS[last.updatedBy.role as Role] ?? last.updatedBy.role}
-                        </span>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="flex items-center gap-2 px-3 pt-2.5 pb-2">
-                      <RefreshCw className="h-3 w-3 opacity-60 shrink-0" />
-                      <span className="font-semibold">جدولة تلقائية</span>
-                    </div>
-                  )}
-
-                  {/* Divider */}
-                  <div className="h-px bg-background/20 mx-0" />
-
-                  {/* Date + time block */}
-                  <div className="flex flex-col gap-1.5 px-3 pt-2 pb-2.5">
-                    <div className="flex items-center gap-2">
-                      <CalendarDays className="h-3 w-3 opacity-60 shrink-0" />
-                      <span className="opacity-80">{formatDate(finishedAt)}</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Timer className="h-3 w-3 opacity-60 shrink-0" />
-                      <span className="opacity-80">{formatTime(finishedAt)}</span>
-                    </div>
-                  </div>
-
-                </div>
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
+            onSync={() => setShowConfirm(true)}
+          />
         )}
 
       </div>

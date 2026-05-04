@@ -7,10 +7,11 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { formatOrderDate } from "@/lib/date-format";
 import {
-  Plus, Download, Upload, Loader2, ChevronRight, ChevronLeft,
+  Plus, Download, Upload, Loader2,
   Filter, X, CalendarIcon, FileDown, AlertCircle, CheckCircle2, Trash2,
   RefreshCw,
 } from "lucide-react";
+import { PaginationArrows } from "@/components/shared/PaginationArrows";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -1340,27 +1341,12 @@ function OrdersPageInner({ setImportOpen }: { setImportOpen: (open: boolean) => 
           <span>
             صفحة {data.page} من {data.totalPages} — {data.total.toLocaleString("ar")} طلب
           </span>
-          <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={page <= 1}
-              onClick={() => updateParam("page", String(page - 1))}
-            >
-              <ChevronRight className="h-4 w-4" />
-              <span className="hidden sm:inline mr-1">السابق</span>
-            </Button>
-            <span className="px-1 font-medium">{page}</span>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={page >= (data?.totalPages ?? 1)}
-              onClick={() => updateParam("page", String(page + 1))}
-            >
-              <span className="hidden sm:inline ml-1">التالي</span>
-              <ChevronLeft className="h-4 w-4" />
-            </Button>
-          </div>
+          <PaginationArrows
+            page={page}
+            totalPages={data.totalPages}
+            onPrev={() => updateParam("page", String(page - 1))}
+            onNext={() => updateParam("page", String(page + 1))}
+          />
         </div>
       )}
 

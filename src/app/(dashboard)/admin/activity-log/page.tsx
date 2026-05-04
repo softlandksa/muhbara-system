@@ -6,13 +6,13 @@ import { useSession } from "next-auth/react";
 import { useQuery } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { formatDateTime } from "@/lib/date-format";
-import { Activity, CalendarIcon, ChevronLeft, ChevronRight } from "lucide-react";
+import { Activity, CalendarIcon } from "lucide-react";
+import { PaginationArrows } from "@/components/shared/PaginationArrows";
 
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Label } from "@/components/ui/label";
-import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 import {
@@ -272,22 +272,12 @@ function ActivityLogInner() {
           <span className="text-muted-foreground">
             {pagination.total} سجل · صفحة {pagination.page} من {pagination.totalPages}
           </span>
-          <div className="flex items-center gap-2">
-            <Button
-              variant="outline" size="sm"
-              disabled={pagination.page <= 1}
-              onClick={() => setParam("page", String(pagination.page - 1))}
-            >
-              <ChevronRight className="h-4 w-4" />
-            </Button>
-            <Button
-              variant="outline" size="sm"
-              disabled={pagination.page >= pagination.totalPages}
-              onClick={() => setParam("page", String(pagination.page + 1))}
-            >
-              <ChevronLeft className="h-4 w-4" />
-            </Button>
-          </div>
+          <PaginationArrows
+            page={pagination.page}
+            totalPages={pagination.totalPages}
+            onPrev={() => setParam("page", String(pagination.page - 1))}
+            onNext={() => setParam("page", String(pagination.page + 1))}
+          />
         </div>
       )}
     </div>

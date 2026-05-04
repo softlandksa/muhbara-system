@@ -46,6 +46,8 @@ export async function GET() {
     if (user) updatedBy = user;
   }
 
-  const { triggeredByUserId: _omit, ...rest } = last;
-  return NextResponse.json({ data: { ...rest, updatedBy } });
+  const { triggeredByUserId: _omit, skippedCount, ...rest } = last;
+  return NextResponse.json({
+    data: { ...rest, skippedEmptyCount: skippedCount, updatedBy },
+  });
 }

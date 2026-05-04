@@ -10,8 +10,9 @@ import { formatOrderDate } from "@/lib/date-format";
 import {
   ArrowRight, Users, Clock, TrendingUp, ShoppingCart, CheckCircle,
   Truck, RotateCcw, XCircle, Filter, X, CalendarIcon, Download,
-  Loader2, Search, ChevronLeft, ChevronRight,
+  Loader2, Search,
 } from "lucide-react";
+import { PaginationArrows } from "@/components/shared/PaginationArrows";
 import { toast } from "sonner";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -565,15 +566,12 @@ function EmployeeDetail({
       {totalPages > 1 && (
         <div className="flex items-center justify-between text-sm text-muted-foreground">
           <span>{data?.total ?? 0} طلب — صفحة {page} من {totalPages}</span>
-          <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage(page - 1)}>
-              <ChevronRight className="h-4 w-4" />
-            </Button>
-            <span>{page}</span>
-            <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => setPage(page + 1)}>
-              <ChevronLeft className="h-4 w-4" />
-            </Button>
-          </div>
+          <PaginationArrows
+            page={page}
+            totalPages={totalPages}
+            onPrev={() => setPage(page - 1)}
+            onNext={() => setPage(page + 1)}
+          />
         </div>
       )}
     </div>

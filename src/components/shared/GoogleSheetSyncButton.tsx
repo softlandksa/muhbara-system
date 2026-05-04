@@ -55,7 +55,7 @@ type LastSyncInfo = {
   sheetsSkipped: number;
   totalRows: number;
   importedCount: number;
-  skippedCount: number;
+  skippedEmptyCount: number;
   duplicateCount: number;
   failedCount: number;
   triggeredBy: string;
@@ -68,7 +68,7 @@ type SyncResultData = {
   sheetsSkipped: number;
   totalRows: number;
   importedCount: number;
-  skippedCount: number;
+  skippedEmptyCount: number;
   duplicateCount: number;
   failedCount: number;
 };
@@ -115,22 +115,15 @@ export function GoogleSheetSyncButton({
       }
 
       if (json.data) {
-        const {
-          totalSheets, sheetsSkipped, totalRows,
-          importedCount, skippedCount, duplicateCount, failedCount,
-        } = json.data;
+        const { importedCount, duplicateCount, skippedEmptyCount, failedCount } = json.data;
 
-        const parts: string[] = [
-          `أوراق: ${totalSheets}${sheetsSkipped > 0 ? ` (متخطى: ${sheetsSkipped})` : ""}`,
-          `صفوف: ${totalRows}`,
-          `مستورد: ${importedCount}`,
-        ];
-        if (duplicateCount > 0) parts.push(`مكررون: ${duplicateCount}`);
-        if (skippedCount > 0)   parts.push(`متخطى: ${skippedCount}`);
-        if (failedCount > 0)    parts.push(`فاشل: ${failedCount}`);
+        const parts: string[] = [`تم رفع ${importedCount} طلب`];
+        parts.push(`مكرر ${duplicateCount}`);
+        if (skippedEmptyCount > 0) parts.push(`تم تجاهل ${skippedEmptyCount} صف فارغ`);
+        if (failedCount > 0)       parts.push(`فشل ${failedCount}`);
 
-        toast.success("تم التحديث بنجاح", {
-          description: parts.join(" · "),
+        toast.success("تم التحديث", {
+          description: parts.join("، "),
           duration: 7000,
         });
       } else {

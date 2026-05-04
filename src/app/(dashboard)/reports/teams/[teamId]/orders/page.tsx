@@ -9,8 +9,9 @@ import { format } from "date-fns";
 import { formatOrderDate } from "@/lib/date-format";
 import {
   ArrowRight, Download, Search, Filter, X, CalendarIcon,
-  ShoppingCart, CheckCircle, Truck, RotateCcw, XCircle, ChevronLeft, ChevronRight,
+  ShoppingCart, CheckCircle, Truck, RotateCcw, XCircle,
 } from "lucide-react";
+import { PaginationArrows } from "@/components/shared/PaginationArrows";
 
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -421,23 +422,12 @@ function TeamOrdersInner() {
               <p className="text-sm text-muted-foreground">
                 {((filters.page - 1) * PAGE_SIZE) + 1}–{Math.min(filters.page * PAGE_SIZE, total)} من {total.toLocaleString()}
               </p>
-              <div className="flex items-center gap-1">
-                <Button
-                  variant="outline" size="icon" className="h-8 w-8"
-                  disabled={filters.page <= 1}
-                  onClick={() => setFilters((f) => ({ ...f, page: f.page - 1 }))}
-                >
-                  <ChevronRight className="h-4 w-4" />
-                </Button>
-                <span className="text-sm px-2">صفحة {filters.page} / {totalPages}</span>
-                <Button
-                  variant="outline" size="icon" className="h-8 w-8"
-                  disabled={filters.page >= totalPages}
-                  onClick={() => setFilters((f) => ({ ...f, page: f.page + 1 }))}
-                >
-                  <ChevronLeft className="h-4 w-4" />
-                </Button>
-              </div>
+              <PaginationArrows
+                page={filters.page}
+                totalPages={totalPages}
+                onPrev={() => setFilters((f) => ({ ...f, page: f.page - 1 }))}
+                onNext={() => setFilters((f) => ({ ...f, page: f.page + 1 }))}
+              />
             </div>
           )}
         </Card>

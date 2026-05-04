@@ -56,7 +56,7 @@ export async function GET(request: NextRequest) {
       `[cron/google-sheets-sync] completed — ` +
       `sheets:${result.totalSheets} (skipped:${result.sheetsSkipped}) ` +
       `rows:${result.totalRows} imported:${result.importedCount} ` +
-      `duplicates:${result.duplicateCount} skipped:${result.skippedCount} failed:${result.failedCount}`
+      `duplicates:${result.duplicateCount} emptySkipped:${result.skippedEmptyCount} failed:${result.failedCount}`
     );
     return NextResponse.json({ data: result });
   } catch (err) {

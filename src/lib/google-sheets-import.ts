@@ -35,7 +35,7 @@ export type SyncResult = {
   sheetsSkipped: number;
   totalRows: number;
   importedCount: number;
-  skippedCount: number;
+  skippedEmptyCount: number;
   duplicateCount: number;
   failedCount: number;
   startedAt: Date;
@@ -54,7 +54,7 @@ type WriteBack = {
 
 function getCell(values: string[], map: HeaderMap, col: string): string {
   const idx = map[col];
-  return idx !== undefined ? (values[idx] ?? "") : "";
+  return idx !== undefined ? (values[idx] ?? "").trim() : "";
 }
 
 function lc(s: string): string {
@@ -88,6 +88,19 @@ function guessMime(url: string): string {
   if (lower.endsWith(".png")) return "image/png";
   if (lower.endsWith(".webp")) return "image/webp";
   return "application/octet-stream";
+}
+
+/**
+ * Returns true if none of the four key identifier fields contain any data.
+ * Such rows are silently skipped with no write-back.
+ */
+function isRowEmpty(values: string[], map: HeaderMap): boolean {
+  return (
+    !getCell(values, map, H_EXTERNAL_ID) &&
+    !getCell(values, map, H_CUSTOMER_NAME) &&
+    !getCell(values, map, H_PHONE) &&
+    !getCell(values, map, H_PRODUCT)
+  );
 }
 
 
@@ -125,7 +138,7 @@ export async function runGoogleSheetsImport(
   let sheetsSkipped = 0;
   let totalRows = 0;
   let importedCount = 0;
-  let skippedCount = 0;
+  let skippedEmptyCount = 0;
   let duplicateCount = 0;
   let failedCount = 0;
 
@@ -153,7 +166,7 @@ export async function runGoogleSheetsImport(
       return {
         syncRunId: syncRun.id,
         totalSheets: 0, sheetsSkipped: 0, totalRows: 0,
-        importedCount: 0, skippedCount: 0, duplicateCount: 0, failedCount: 0,
+        importedCount: 0, skippedEmptyCount: 0, duplicateCount: 0, failedCount: 0,
         startedAt, finishedAt,
       };
     }
@@ -291,13 +304,23 @@ export async function runGoogleSheetsImport(
 
         for (const row of candidateRows) {
           const { rowIndex, values } = row;
+
+          console.log("GOOGLE_SYNC_ROW_INDEX", { sheet: sheetName, rowIndex });
+
+          // ── Empty row guard — skip silently with no write-back ─────────
+          if (isRowEmpty(values, headerMap)) {
+            console.log("GOOGLE_SYNC_ROW_EMPTY_SKIPPED", { sheet: sheetName, rowIndex });
+            skippedEmptyCount++;
+            continue;
+          }
+
           const externalOrderId = getCell(values, headerMap, H_EXTERNAL_ID);
 
           // ── Duplicate guard via import log ─────────────────────────────
           if (externalOrderId) {
             const log = importLogByExternalId.get(externalOrderId);
             if (log?.status === "SYNCED") {
-              skippedCount++;
+              console.log("GOOGLE_SYNC_ROW_WRITEBACK", { sheet: sheetName, rowIndex, status: "Synced (already in log)" });
               sheetWriteBacks.push({
                 rowIndex,
                 syncStatus: "Synced",
@@ -310,8 +333,6 @@ export async function runGoogleSheetsImport(
 
           // ── Validation ─────────────────────────────────────────────────
           const errs: string[] = [];
-
-          if (!externalOrderId) errs.push("External Order ID مطلوب");
 
           const orderDateRaw = getCell(values, headerMap, H_ORDER_DATE);
           const orderDate = orderDateRaw ? parseSheetOrderDate(orderDateRaw) : null;
@@ -376,11 +397,12 @@ export async function runGoogleSheetsImport(
           }
 
           if (errs.length > 0) {
-            failedCount++;
             const errorMessage = errs.join(" | ");
             console.warn(
-              `[GoogleSheetsImport] sheet="${sheetName}" row ${rowIndex} validation failed: ${errorMessage}`
+              `GOOGLE_SYNC_ROW_VALID`, { valid: false, sheet: sheetName, rowIndex, errors: errorMessage }
             );
+            failedCount++;
+            console.log("GOOGLE_SYNC_ROW_WRITEBACK", { sheet: sheetName, rowIndex, status: "Failed" });
             sheetWriteBacks.push({
               rowIndex,
               syncStatus: "Failed",
@@ -404,7 +426,10 @@ export async function runGoogleSheetsImport(
             continue;
           }
 
+          console.log("GOOGLE_SYNC_ROW_VALID", { valid: true, sheet: sheetName, rowIndex });
+
           // ── Duplicate customer check ───────────────────────────────────
+          // Only runs on valid non-empty rows; never runs on rows with blank name/phone.
           const normPhone = normalizePhone(phone);
           const normName = normalizeName(customerName);
           const phoneMatches = normPhone.length > 0 && existingPhones.has(normPhone);
@@ -419,10 +444,13 @@ export async function runGoogleSheetsImport(
                 ? "طلب مكرر بسبب تطابق رقم الجوال"
                 : "طلب مكرر بسبب تطابق اسم العميل";
             console.warn(
-              `[GoogleSheetsImport] sheet="${sheetName}" row ${rowIndex} — ` +
-              `duplicate: name="${customerName}" phone="${phone}" ` +
-              `(phoneMatch=${phoneMatches} nameMatch=${nameMatches})`
+              `GOOGLE_SYNC_ROW_DUPLICATE`, {
+                sheet: sheetName, rowIndex,
+                name: customerName, phone,
+                phoneMatch: phoneMatches, nameMatch: nameMatches,
+              }
             );
+            console.log("GOOGLE_SYNC_ROW_WRITEBACK", { sheet: sheetName, rowIndex, status: "Duplicate" });
             sheetWriteBacks.push({
               rowIndex,
               syncStatus: "Duplicate",
@@ -492,7 +520,7 @@ export async function runGoogleSheetsImport(
                   action: "IMPORT_ORDER_SHEETS",
                   changedById: employee!.id,
                   changedAt: new Date(),
-                  newValue: `External Order ID: ${externalOrderId} | Sheet: ${sheetName}`,
+                  newValue: `External Order ID: ${externalOrderId || "N/A"} | Sheet: ${sheetName}`,
                 },
               });
 
@@ -516,40 +544,40 @@ export async function runGoogleSheetsImport(
                 });
               }
 
-              await tx.googleSheetImportLog.upsert({
-                where: { externalOrderId },
-                create: {
-                  externalOrderId,
-                  spreadsheetId,
-                  sheetName,
-                  rowNumber: rowIndex,
-                  systemOrderId: created.id,
-                  status: "SYNCED",
-                  importedAt: new Date(),
-                },
-                update: {
-                  rowNumber: rowIndex,
-                  sheetName,
-                  systemOrderId: created.id,
-                  status: "SYNCED",
-                  errorMessage: null,
-                  importedAt: new Date(),
-                },
-              });
+              // Only write to import log when externalOrderId is present
+              if (externalOrderId) {
+                await tx.googleSheetImportLog.upsert({
+                  where: { externalOrderId },
+                  create: {
+                    externalOrderId,
+                    spreadsheetId,
+                    sheetName,
+                    rowNumber: rowIndex,
+                    systemOrderId: created.id,
+                    status: "SYNCED",
+                    importedAt: new Date(),
+                  },
+                  update: {
+                    rowNumber: rowIndex,
+                    sheetName,
+                    systemOrderId: created.id,
+                    status: "SYNCED",
+                    errorMessage: null,
+                    importedAt: new Date(),
+                  },
+                });
+              }
 
               return created;
             });
 
+            // Order created successfully in DB — only NOW mark as Synced
             importedCount++;
-            // Register newly imported customer so the same person isn't imported
-            // again from another sheet within this sync run.
             if (normPhone) existingPhones.add(normPhone);
             if (normName) existingNames.add(normName);
 
-            console.log(
-              `[GoogleSheetsImport] sheet="${sheetName}" row ${rowIndex} ` +
-              `imported → ${order.orderNumber} (externalId: ${externalOrderId})`
-            );
+            console.log("GOOGLE_SYNC_ROW_CREATED", { sheet: sheetName, rowIndex, orderNumber: order.orderNumber });
+            console.log("GOOGLE_SYNC_ROW_WRITEBACK", { sheet: sheetName, rowIndex, status: "Synced", orderNumber: order.orderNumber });
             sheetWriteBacks.push({
               rowIndex,
               syncStatus: "Synced",
@@ -562,13 +590,14 @@ export async function runGoogleSheetsImport(
               orderNumber: order.orderNumber,
             });
           } catch (err) {
-            console.error(
-              `[GoogleSheetsImport] sheet="${sheetName}" row ${rowIndex} order creation failed:`,
-              err
-            );
-            failedCount++;
+            // DB insert failed — write Failed, never write Synced
             const errorMessage =
               err instanceof Error ? err.message : "خطأ غير متوقع أثناء إنشاء الطلب";
+            console.error(
+              `GOOGLE_SYNC_ROW_WRITEBACK`,
+              { sheet: sheetName, rowIndex, status: "Failed", error: errorMessage }
+            );
+            failedCount++;
             sheetWriteBacks.push({
               rowIndex,
               syncStatus: "Failed",
@@ -646,10 +675,11 @@ export async function runGoogleSheetsImport(
       `[GoogleSheetsImport] sync COMPLETED in ${durationSec}s — ` +
       `sheets: ${totalSheets} (skipped: ${sheetsSkipped}) | ` +
       `rows: ${totalRows} | imported: ${importedCount} | ` +
-      `duplicates: ${duplicateCount} | skipped: ${skippedCount} | failed: ${failedCount}`
+      `duplicates: ${duplicateCount} | emptySkipped: ${skippedEmptyCount} | failed: ${failedCount}`
     );
     console.log("GOOGLE_SYNC_IMPORTED_COUNT", importedCount);
     console.log("GOOGLE_SYNC_DUPLICATE_COUNT", duplicateCount);
+    console.log("GOOGLE_SYNC_EMPTY_SKIPPED_COUNT", skippedEmptyCount);
     console.log("GOOGLE_SYNC_FAILED_COUNT", failedCount);
 
     await prisma.googleSheetSyncRun.update({
@@ -661,7 +691,7 @@ export async function runGoogleSheetsImport(
         sheetsSkipped,
         totalRows,
         importedCount,
-        skippedCount,
+        skippedCount: skippedEmptyCount, // DB column reused for empty-row skips
         duplicateCount,
         failedCount,
       },
@@ -673,7 +703,7 @@ export async function runGoogleSheetsImport(
       sheetsSkipped,
       totalRows,
       importedCount,
-      skippedCount,
+      skippedEmptyCount,
       duplicateCount,
       failedCount,
       startedAt,
@@ -693,7 +723,7 @@ export async function runGoogleSheetsImport(
           sheetsSkipped,
           totalRows,
           importedCount,
-          skippedCount,
+          skippedCount: skippedEmptyCount,
           duplicateCount,
           failedCount,
           errorSummary,

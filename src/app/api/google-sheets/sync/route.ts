@@ -90,7 +90,7 @@ export async function POST() {
     console.log(
       `GOOGLE_SYNC_COMPLETED sheets:${result.totalSheets} skipped:${result.sheetsSkipped} ` +
       `rows:${result.totalRows} imported:${result.importedCount} ` +
-      `duplicates:${result.duplicateCount} skippedRows:${result.skippedCount} failed:${result.failedCount}`
+      `duplicates:${result.duplicateCount} emptySkipped:${result.skippedEmptyCount} failed:${result.failedCount}`
     );
     return NextResponse.json({ success: true, data: result });
   } catch (err) {

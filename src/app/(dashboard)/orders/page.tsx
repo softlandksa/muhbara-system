@@ -9,13 +9,12 @@ import { formatOrderDate } from "@/lib/date-format";
 import {
   Plus, Download, Upload, Loader2,
   Filter, X, CalendarIcon, FileDown, AlertCircle, CheckCircle2, Trash2,
-  RefreshCw,
+  RefreshCw, ListChecks,
 } from "lucide-react";
 import { PaginationArrows } from "@/components/shared/PaginationArrows";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { SearchInput } from "@/components/ui/search-input";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -756,11 +755,7 @@ function OrdersPageInner({ setImportOpen }: { setImportOpen: (open: boolean) => 
   // ── Local state ──
   const [searchInput, setSearchInput] = useState(searchQ);
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  // Bulk selection scope
-  const [selectionScope, setSelectionScope] = useState<"page" | "all" | "limited">("page");
-  const [selectionLimit, setSelectionLimit] = useState(0);
-  const [scopeDialogOpen, setScopeDialogOpen] = useState(false);
-  const [limitInput, setLimitInput] = useState("");
+  const [bulkMenuOpen, setBulkMenuOpen] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
   const [dateFromOpen, setDateFromOpen] = useState(false);
   const [dateToOpen, setDateToOpen] = useState(false);
@@ -824,35 +819,19 @@ function OrdersPageInner({ setImportOpen }: { setImportOpen: (open: boolean) => 
   const allIds = data?.data.map((o) => o.id) ?? [];
   const allSelected = allIds.length > 0 && allIds.every((id) => selected.has(id));
 
-  const effectiveSelectionCount =
-    selectionScope === "all" ? (data?.total ?? 0) :
-    selectionScope === "limited" ? selectionLimit :
-    selected.size;
-
   const clearSelection = () => {
     setSelected(new Set());
-    setSelectionScope("page");
-    setSelectionLimit(0);
   };
 
   const toggleAll = () => {
     if (allSelected) {
-      // Deselect: clear current page + reset scope
       setSelected((prev) => { const n = new Set(prev); allIds.forEach((id) => n.delete(id)); return n; });
-      setSelectionScope("page");
       return;
     }
-    // Select all current page items
     setSelected((prev) => { const n = new Set(prev); allIds.forEach((id) => n.add(id)); return n; });
-    // If more pages exist, offer scope expansion
-    if ((data?.totalPages ?? 1) > 1) {
-      setScopeDialogOpen(true);
-    }
   };
 
   const toggleOne = (id: string) => {
-    // Reset scope when user manually selects/deselects individual rows
-    if (selectionScope !== "page") setSelectionScope("page");
     setSelected((prev) => {
       const n = new Set(prev);
       n.has(id) ? n.delete(id) : n.add(id);
@@ -860,14 +839,12 @@ function OrdersPageInner({ setImportOpen }: { setImportOpen: (open: boolean) => 
     });
   };
 
-  // Build the PATCH body based on selection scope
-  const buildBulkPayload = (action: "status" | "delete", statusId?: string) => {
-    const filters = buildFilters();
-    const base = { action, ...(statusId && { statusId }) };
-    if (selectionScope === "all") return { ...base, scope: "all" as const, filters };
-    if (selectionScope === "limited") return { ...base, scope: "limited" as const, limit: selectionLimit, filters };
-    return { ...base, scope: "ids" as const, ids: Array.from(selected) };
-  };
+  const buildBulkPayload = (action: "status" | "delete", statusId?: string) => ({
+    action,
+    scope: "ids" as const,
+    ids: Array.from(selected),
+    ...(statusId && { statusId }),
+  });
 
   // ── Helpers ──
   const downloadBlob = (blob: Blob, filename: string) => {
@@ -1062,8 +1039,9 @@ function OrdersPageInner({ setImportOpen }: { setImportOpen: (open: boolean) => 
         </div>
       </div>
 
-      {/* Search + Filter */}
-      <div className="flex items-center gap-2">
+      {/* Search + Filter + Bulk Actions */}
+      <div className="flex items-center gap-2 justify-between">
+        <div className="flex items-center gap-2">
         <SearchInput
           className="w-[30%] min-w-[220px]"
           placeholder="بحث برقم الطلب أو اسم العميل أو الجوال..."
@@ -1181,75 +1159,79 @@ function OrdersPageInner({ setImportOpen }: { setImportOpen: (open: boolean) => 
             </div>
           </PopoverContent>
         </Popover>
-      </div>
+        </div>
 
-      {/* Bulk Action Bar */}
-      {(selected.size > 0 || selectionScope !== "page") && (
-        <div className="flex items-center gap-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-          <span className="text-sm font-medium text-blue-800">
-            {selectionScope === "all"
-              ? `تم تحديد جميع النتائج (${(data?.total ?? 0).toLocaleString("ar")} طلب)`
-              : selectionScope === "limited"
-              ? `تم تحديد أول ${selectionLimit.toLocaleString("ar")} طلب من جميع النتائج`
-              : `تم تحديد ${selected.size} طلب`}
-          </span>
-          <div className="flex items-center gap-2 mr-auto">
-            {(role === "ADMIN" || role === "GENERAL_MANAGER" || role === "SALES_MANAGER" || role === "SALES") && (
-              <>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleExportSelected}
-                  disabled={exportLoading}
-                >
-                  {exportLoading
-                    ? <Loader2 className="h-4 w-4 animate-spin ml-1" />
-                    : <Download className="h-4 w-4 ml-1" />
-                  }
-                  المحدد في الصفحة ({selected.size})
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handleExportFiltered()}
-                  disabled={exportLoading}
-                >
-                  <Download className="h-4 w-4 ml-1" />
-                  تحديد الكل حسب الفلاتر
-                  {data?.total != null && ` (${data.total.toLocaleString("ar")})`}
-                </Button>
-              </>
-            )}
-            {(role === "ADMIN" || role === "SALES_MANAGER") && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setBulkStatusOpen(true)}
-              >
-                <RefreshCw className="h-4 w-4 ml-1" />
-                تغيير الحالة
-              </Button>
-            )}
-            {role === "ADMIN" && (
-              <Button
-                variant="destructive"
-                size="sm"
-                onClick={() => setBulkDeleteConfirm(true)}
-                disabled={bulkDeleteLoading}
-              >
-                {bulkDeleteLoading
-                  ? <Loader2 className="h-4 w-4 animate-spin ml-1" />
-                  : <Trash2 className="h-4 w-4 ml-1" />
-                }
-                حذف المحدد
-              </Button>
-            )}
+        {/* ── Bulk Actions ── */}
+        {selected.size > 0 && (
+          <div dir="rtl" className="flex items-center gap-2">
+            <span className="text-sm text-muted-foreground">
+              {selected.size === 1 ? "طلب واحد محدد" : `${selected.size} طلبات محددة`}
+            </span>
+
+            <Popover open={bulkMenuOpen} onOpenChange={setBulkMenuOpen}>
+              <PopoverTrigger className="inline-flex items-center justify-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground shadow-sm hover:bg-primary/90 transition-colors">
+                <ListChecks className="h-4 w-4" />
+                إجراءات جماعية
+              </PopoverTrigger>
+              <PopoverContent align="end" className="w-52 p-1.5 space-y-0.5">
+
+                {/* Export */}
+                {(role === "ADMIN" || role === "GENERAL_MANAGER" || role === "SALES_MANAGER" || role === "SALES") && (
+                  <button
+                    type="button"
+                    onClick={() => { setBulkMenuOpen(false); handleExportSelected(); }}
+                    disabled={exportLoading}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 text-sm rounded-lg hover:bg-muted transition-colors text-right disabled:opacity-50"
+                  >
+                    {exportLoading
+                      ? <Loader2 className="h-4 w-4 shrink-0 animate-spin opacity-70" />
+                      : <Download className="h-4 w-4 shrink-0 opacity-70" />
+                    }
+                    تصدير المحدد إلى Excel
+                  </button>
+                )}
+
+                {/* Change Status */}
+                {(role === "ADMIN" || role === "SALES_MANAGER") && (
+                  <button
+                    type="button"
+                    onClick={() => { setBulkMenuOpen(false); setBulkStatusOpen(true); }}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 text-sm rounded-lg hover:bg-muted transition-colors text-right"
+                  >
+                    <RefreshCw className="h-4 w-4 shrink-0 opacity-70" />
+                    تغيير حالة الشحن
+                  </button>
+                )}
+
+                {/* Divider + Delete */}
+                {role === "ADMIN" && (
+                  <>
+                    <div className="h-px bg-border my-1" />
+                    <button
+                      type="button"
+                      onClick={() => { setBulkMenuOpen(false); setBulkDeleteConfirm(true); }}
+                      disabled={bulkDeleteLoading}
+                      className="w-full flex items-center gap-2.5 px-3 py-2 text-sm rounded-lg hover:bg-red-50 text-red-600 transition-colors text-right disabled:opacity-50"
+                    >
+                      {bulkDeleteLoading
+                        ? <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+                        : <Trash2 className="h-4 w-4 shrink-0" />
+                      }
+                      حذف المحدد
+                    </button>
+                  </>
+                )}
+
+              </PopoverContent>
+            </Popover>
+
             <Button variant="ghost" size="sm" onClick={clearSelection}>
+              <X className="h-4 w-4 ml-1" />
               إلغاء التحديد
             </Button>
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
       {/* Table */}
       <div className="rounded-lg border overflow-hidden">
@@ -1350,74 +1332,11 @@ function OrdersPageInner({ setImportOpen }: { setImportOpen: (open: boolean) => 
         </div>
       )}
 
-      {/* Selection Scope Dialog */}
-      <Dialog open={scopeDialogOpen} onOpenChange={setScopeDialogOpen}>
-        <DialogContent dir="rtl" className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle>نطاق التحديد</DialogTitle>
-          </DialogHeader>
-          <p className="text-sm text-muted-foreground">
-            تم تحديد {allIds.length} طلب في هذه الصفحة. يوجد{" "}
-            <span className="font-medium text-foreground">{(data?.total ?? 0).toLocaleString("ar")}</span>{" "}
-            طلب إجمالاً يطابق الفلاتر الحالية. كيف تريد التحديد؟
-          </p>
-          <div className="space-y-2">
-            <Button
-              variant="outline"
-              className="w-full justify-start"
-              onClick={() => { setSelectionScope("page"); setScopeDialogOpen(false); }}
-            >
-              هذه الصفحة فقط ({allIds.length} طلب)
-            </Button>
-            <Button
-              variant="outline"
-              className="w-full justify-start"
-              onClick={() => { setSelectionScope("all"); setScopeDialogOpen(false); }}
-            >
-              جميع النتائج المطابقة ({(data?.total ?? 0).toLocaleString("ar")} طلب)
-            </Button>
-            <div className="space-y-2 pt-1">
-              <p className="text-sm font-medium">تحديد عدد معين:</p>
-              <div className="flex gap-2">
-                <Input
-                  type="number"
-                  min={1}
-                  max={data?.total ?? 9999}
-                  placeholder="أدخل عدداً"
-                  value={limitInput}
-                  onChange={(e) => setLimitInput(e.target.value)}
-                  className="flex-1"
-                  dir="ltr"
-                />
-                <Button
-                  variant="outline"
-                  disabled={!limitInput || parseInt(limitInput) < 1}
-                  onClick={() => {
-                    const n = parseInt(limitInput);
-                    if (n > 0) {
-                      setSelectionScope("limited");
-                      setSelectionLimit(n);
-                      setScopeDialogOpen(false);
-                      setLimitInput("");
-                    }
-                  }}
-                >
-                  تأكيد
-                </Button>
-              </div>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setScopeDialogOpen(false)}>إلغاء</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
       {/* Bulk Status Dialog */}
       <BulkStatusDialog
         open={bulkStatusOpen}
         onClose={() => setBulkStatusOpen(false)}
-        count={effectiveSelectionCount}
+        count={selected.size}
         onConfirm={handleBulkStatusConfirm}
       />
 
@@ -1426,13 +1345,7 @@ function OrdersPageInner({ setImportOpen }: { setImportOpen: (open: boolean) => 
         open={bulkDeleteConfirm}
         onOpenChange={setBulkDeleteConfirm}
         title="حذف الطلبات المحددة"
-        description={
-          selectionScope === "all"
-            ? `هل أنت متأكد من حذف جميع النتائج المطابقة (${(data?.total ?? 0).toLocaleString("ar")} طلب)؟ لا يمكن التراجع عن هذا الإجراء.`
-            : selectionScope === "limited"
-            ? `هل أنت متأكد من حذف أول ${selectionLimit.toLocaleString("ar")} طلب من النتائج المطابقة؟`
-            : `هل أنت متأكد من حذف ${selected.size} طلب؟ لا يمكن التراجع عن هذا الإجراء.`
-        }
+        description={`هل أنت متأكد من حذف ${selected.size} طلب؟ لا يمكن التراجع عن هذا الإجراء.`}
         confirmLabel="حذف"
         cancelLabel="إلغاء"
         onConfirm={handleBulkDelete}

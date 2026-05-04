@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
-import { RefreshCw, Loader2, Clock, User, Mail, Shield, CalendarDays, Timer, AlertTriangle, Trash2 } from "lucide-react";
+import { RefreshCw, RotateCcw, Loader2, Clock, User, Mail, Shield, CalendarDays, Timer, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { ROLE_LABELS } from "@/lib/permissions";
@@ -123,7 +123,7 @@ function ResyncConfirmModal({
                 إضافة الطلبات الجديدة
               </li>
               <li className="flex items-center gap-1.5">
-                <Trash2 className="h-3 w-3 text-red-500 shrink-0" />
+                <span className="h-1.5 w-1.5 rounded-full bg-red-500 shrink-0" />
                 <span className="text-red-600 font-medium">
                   حذف الطلبات المستوردة من الجدول التي لم تعد موجودة فيه
                 </span>
@@ -191,16 +191,26 @@ export function GoogleSheetSyncButton({
     setSyncing(true);
     setActiveMode(mode);
     try {
-      const res  = await fetch("/api/google-sheets/sync", {
+      const res = await fetch("/api/google-sheets/sync", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ mode }),
       });
-      const json = (await res.json()) as SyncResponse;
+
+      // Read as text first so a non-JSON crash response is handled gracefully
+      const text = await res.text();
+      let json: SyncResponse = {};
+      const isJson = res.headers.get("content-type")?.includes("application/json");
+      if (isJson || text.trimStart().startsWith("{")) {
+        try { json = JSON.parse(text); } catch { /* fall through */ }
+      }
 
       if (!res.ok) {
         if (json.debug) console.error("[GoogleSheetSync] server debug:", json.debug);
-        toast.error(json.error ?? "فشل التحديث");
+        if (!isJson && !text.trimStart().startsWith("{")) {
+          console.error("[GoogleSheetSync] non-JSON response", res.status, text.slice(0, 300));
+        }
+        toast.error(json.error ?? `فشل التحديث — خطأ ${res.status}`);
         return;
       }
 
@@ -301,7 +311,7 @@ export function GoogleSheetSyncButton({
             {isResyncing ? (
               <Loader2 className="h-4 w-4 animate-spin shrink-0" />
             ) : (
-              <Trash2 className="h-4 w-4 shrink-0" />
+              <RotateCcw className="h-4 w-4 shrink-0" />
             )}
             <span>{isResyncing ? "جاري إعادة المزامنة..." : "إعادة المزامنة"}</span>
           </button>

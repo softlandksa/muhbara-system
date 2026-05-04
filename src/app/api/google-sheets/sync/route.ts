@@ -34,8 +34,22 @@ function getMissingEnvVars(): string[] {
 
 export async function POST(request: Request) {
   const isDev = process.env.NODE_ENV !== "production";
-
   console.log("GOOGLE_SYNC_ROUTE_HIT");
+
+  // Top-level guard — Next.js would return HTML on unhandled throw; we always return JSON.
+  try {
+    return await handlePost(request, isDev);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("GOOGLE_SYNC_UNHANDLED_ERROR", message);
+    return NextResponse.json(
+      { success: false, code: "INTERNAL_ERROR", error: `خطأ داخلي في الخادم: ${message}` },
+      { status: 500 },
+    );
+  }
+}
+
+async function handlePost(request: Request, isDev: boolean): Promise<Response> {
 
   // ── Auth ────────────────────────────────────────────────────────────────────
   const session = await getServerSession(authOptions);
@@ -84,17 +98,32 @@ export async function POST(request: Request) {
   console.log("GOOGLE_SYNC_ENV_OK", `triggered by ${userId} (${role})`);
 
   // ── Prevent concurrent syncs ─────────────────────────────────────────────────
-  const running = await prisma.googleSheetSyncRun.findFirst({
-    where: { status: "RUNNING" },
-    orderBy: { startedAt: "desc" },
-  });
-  if (running) {
-    console.log(
-      `GOOGLE_SYNC_ALREADY_RUNNING id=${running.id} started=${running.startedAt.toISOString()}`
-    );
+  let running: { id: string; startedAt: Date } | null = null;
+  try {
+    running = await prisma.googleSheetSyncRun.findFirst({
+      where: { status: "RUNNING" },
+      orderBy: { startedAt: "desc" },
+      select: { id: true, startedAt: true },
+    });
+  } catch (dbErr) {
+    const msg = dbErr instanceof Error ? dbErr.message : String(dbErr);
+    console.error("GOOGLE_SYNC_DB_CHECK_ERROR", msg);
+    // Likely a schema mismatch (db push not run) — surface it clearly
     return NextResponse.json(
-      { error: "عملية المزامنة قيد التشغيل بالفعل — يرجى الانتظار" },
-      { status: 409 }
+      {
+        success: false,
+        code: "DB_SCHEMA_MISMATCH",
+        error: "هيكل قاعدة البيانات غير متزامن — يرجى تشغيل: npx prisma db push",
+        ...(isDev && { debug: msg }),
+      },
+      { status: 503 },
+    );
+  }
+  if (running) {
+    console.log(`GOOGLE_SYNC_ALREADY_RUNNING id=${running.id} started=${running.startedAt.toISOString()}`);
+    return NextResponse.json(
+      { success: false, code: "ALREADY_RUNNING", error: "عملية المزامنة قيد التشغيل بالفعل — يرجى الانتظار" },
+      { status: 409 },
     );
   }
 
@@ -162,6 +191,18 @@ export async function POST(request: Request) {
       code       = "UNAUTHENTICATED";
       userMsg    = `فشل التحقق من هوية حساب الخدمة: ${message}`;
       httpStatus = 502;
+    } else if (
+      message.includes("does not exist in the current database") ||
+      message.includes("P2022") ||
+      message.includes("Unknown argument `mode`") ||
+      message.includes("Unknown argument `source`") ||
+      message.includes("Unknown argument `deletedCount`") ||
+      message.includes("Unknown argument `updatedCount`") ||
+      message.includes("Unknown argument `noChangeCount`")
+    ) {
+      code       = "DB_SCHEMA_MISMATCH";
+      userMsg    = "هيكل قاعدة البيانات غير متزامن — يرجى تشغيل: npx prisma db push";
+      httpStatus = 503;
     } else if (message.includes("أعمدة مطلوبة مفقودة")) {
       code       = "MISSING_COLUMNS";
       userMsg    = message;

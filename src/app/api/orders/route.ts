@@ -379,7 +379,7 @@ export async function PATCH(request: NextRequest) {
   }
 
   if (action === "delete") {
-    if (role !== "ADMIN") return NextResponse.json({ error: "ممنوع" }, { status: 403 });
+    if (role !== "ADMIN" && role !== "GENERAL_MANAGER") return NextResponse.json({ error: "ممنوع" }, { status: 403 });
 
     // Collect blob URLs before deletion (PaymentReceipt rows are cascade-deleted by DB)
     const withReceipts = await prisma.order.findMany({
@@ -413,7 +413,7 @@ export async function PATCH(request: NextRequest) {
   }
 
   if (action === "status") {
-    if (role !== "ADMIN" && role !== "SALES_MANAGER") return NextResponse.json({ error: "ممنوع" }, { status: 403 });
+    if (role !== "ADMIN" && role !== "GENERAL_MANAGER" && role !== "SHIPPING") return NextResponse.json({ error: "ممنوع" }, { status: 403 });
     if (!statusId) return NextResponse.json({ error: "الحالة مطلوبة" }, { status: 400 });
     const status = await prisma.shippingStatusPrimary.findUnique({ where: { id: statusId } });
     if (!status) return NextResponse.json({ error: "الحالة غير موجودة" }, { status: 400 });

@@ -744,6 +744,15 @@ function OrdersPageInner({ setImportOpen }: { setImportOpen: (open: boolean) => 
   });
   const filterableUsers = usersData ?? [];
 
+  // ── Countries lookup (admin only — for country filter) ──
+  const { data: countriesData } = useQuery<{ data: { id: string; name: string }[] }>({
+    queryKey: ["lookup-countries"],
+    queryFn: () => fetch("/api/lookup/countries").then((r) => r.json()),
+    enabled: role === "ADMIN",
+    staleTime: 5 * 60 * 1000,
+  });
+  const filterableCountries = countriesData?.data ?? [];
+
   // ── URL state ──
   const page = parseInt(searchParams.get("page") ?? "1");
   const searchQ = searchParams.get("search") ?? "";
@@ -751,6 +760,7 @@ function OrdersPageInner({ setImportOpen }: { setImportOpen: (open: boolean) => 
   const dateFrom = searchParams.get("dateFrom") ?? "";
   const dateTo = searchParams.get("dateTo") ?? "";
   const createdByIdParam = searchParams.get("createdById") ?? "";
+  const countryIdParam = searchParams.get("countryId") ?? "";
 
   // ── Local state ──
   const [searchInput, setSearchInput] = useState(searchQ);
@@ -765,6 +775,7 @@ function OrdersPageInner({ setImportOpen }: { setImportOpen: (open: boolean) => 
   const [tempDateFrom, setTempDateFrom] = useState(dateFrom);
   const [tempDateTo, setTempDateTo] = useState(dateTo);
   const [tempCreatedById, setTempCreatedById] = useState(createdByIdParam);
+  const [tempCountryId, setTempCountryId] = useState(countryIdParam);
   const [exportLoading, setExportLoading] = useState(false);
   const [bulkStatusOpen, setBulkStatusOpen] = useState(false);
   const [bulkDeleteConfirm, setBulkDeleteConfirm] = useState(false);
@@ -778,6 +789,7 @@ function OrdersPageInner({ setImportOpen }: { setImportOpen: (open: boolean) => 
       setTempDateFrom(dateFrom);
       setTempDateTo(dateTo);
       setTempCreatedById(createdByIdParam);
+      setTempCountryId(countryIdParam);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filterOpen]);
@@ -968,7 +980,8 @@ function OrdersPageInner({ setImportOpen }: { setImportOpen: (open: boolean) => 
     }
   };
 
-  const hasActiveFilters = statusParams.length > 0 || dateFrom || dateTo || !!createdByIdParam;
+  const hasActiveFilters =
+    statusParams.length > 0 || dateFrom || dateTo || !!createdByIdParam || !!countryIdParam;
 
   const applyFilters = () => {
     const params = new URLSearchParams(searchParams.toString());
@@ -980,6 +993,8 @@ function OrdersPageInner({ setImportOpen }: { setImportOpen: (open: boolean) => 
     else params.delete("dateTo");
     if (tempCreatedById) params.set("createdById", tempCreatedById);
     else params.delete("createdById");
+    if (tempCountryId) params.set("countryId", tempCountryId);
+    else params.delete("countryId");
     params.set("page", "1");
     router.replace(`${pathname}?${params.toString()}`);
     setFilterOpen(false);
@@ -990,11 +1005,13 @@ function OrdersPageInner({ setImportOpen }: { setImportOpen: (open: boolean) => 
     setTempDateFrom("");
     setTempDateTo("");
     setTempCreatedById("");
+    setTempCountryId("");
     const params = new URLSearchParams(searchParams.toString());
     params.delete("status");
     params.delete("dateFrom");
     params.delete("dateTo");
     params.delete("createdById");
+    params.delete("countryId");
     params.set("page", "1");
     router.replace(`${pathname}?${params.toString()}`);
     setFilterOpen(false);
@@ -1147,18 +1164,56 @@ function OrdersPageInner({ setImportOpen }: { setImportOpen: (open: boolean) => 
               </div>
             )}
 
+            {/* Country filter — admin only */}
+            {role === "ADMIN" && (
+              <div className="space-y-2">
+                <Label className="text-sm font-medium">الدولة</Label>
+                <Select value={tempCountryId} onValueChange={(v) => setTempCountryId(v ?? "")}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="كل الدول" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="">كل الدول</SelectItem>
+                    {filterableCountries.map((c) => (
+                      <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
             {/* Action buttons */}
             <div className="flex flex-col gap-2 pt-1 border-t">
               <Button size="sm" className="w-full" onClick={applyFilters}>
                 تطبيق الفلتر
               </Button>
-              <Button variant="ghost" size="sm" className="w-full" onClick={clearFilters}>
+              <Button variant="outline" size="sm" className="w-full" onClick={clearFilters}>
                 <X className="h-3 w-3 ml-1" />
-                مسح الفلاتر
+                إلغاء الفلتر
               </Button>
             </div>
           </PopoverContent>
         </Popover>
+
+        {/* Active country chip */}
+        {role === "ADMIN" && countryIdParam && (
+          <span className="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full bg-primary/10 text-primary border border-primary/20 font-medium">
+            الدولة: {filterableCountries.find((c) => c.id === countryIdParam)?.name ?? countryIdParam}
+            <button
+              type="button"
+              onClick={() => {
+                setTempCountryId("");
+                const params = new URLSearchParams(searchParams.toString());
+                params.delete("countryId");
+                params.set("page", "1");
+                router.replace(`${pathname}?${params.toString()}`);
+              }}
+              className="hover:opacity-70 transition-opacity ml-0.5"
+            >
+              <X className="h-3 w-3" />
+            </button>
+          </span>
+        )}
         </div>
 
         {/* ── Bulk Actions ── */}
@@ -1175,24 +1230,22 @@ function OrdersPageInner({ setImportOpen }: { setImportOpen: (open: boolean) => 
               </PopoverTrigger>
               <PopoverContent align="end" className="w-52 p-1.5 space-y-0.5">
 
-                {/* Export */}
-                {(role === "ADMIN" || role === "GENERAL_MANAGER" || role === "SALES_MANAGER" || role === "SALES") && (
-                  <button
-                    type="button"
-                    onClick={() => { setBulkMenuOpen(false); handleExportSelected(); }}
-                    disabled={exportLoading}
-                    className="w-full flex items-center gap-2.5 px-3 py-2 text-sm rounded-lg hover:bg-muted transition-colors text-right disabled:opacity-50"
-                  >
-                    {exportLoading
-                      ? <Loader2 className="h-4 w-4 shrink-0 animate-spin opacity-70" />
-                      : <Download className="h-4 w-4 shrink-0 opacity-70" />
-                    }
-                    تصدير المحدد إلى Excel
-                  </button>
-                )}
+                {/* Export — all users */}
+                <button
+                  type="button"
+                  onClick={() => { setBulkMenuOpen(false); handleExportSelected(); }}
+                  disabled={exportLoading}
+                  className="w-full flex items-center gap-2.5 px-3 py-2 text-sm rounded-lg hover:bg-muted transition-colors text-right disabled:opacity-50"
+                >
+                  {exportLoading
+                    ? <Loader2 className="h-4 w-4 shrink-0 animate-spin opacity-70" />
+                    : <Download className="h-4 w-4 shrink-0 opacity-70" />
+                  }
+                  تصدير المحدد إلى Excel
+                </button>
 
-                {/* Change Status */}
-                {(role === "ADMIN" || role === "SALES_MANAGER") && (
+                {/* Change Status — admin, GM, shipping */}
+                {(role === "ADMIN" || role === "GENERAL_MANAGER" || role === "SHIPPING") && (
                   <button
                     type="button"
                     onClick={() => { setBulkMenuOpen(false); setBulkStatusOpen(true); }}
@@ -1203,8 +1256,8 @@ function OrdersPageInner({ setImportOpen }: { setImportOpen: (open: boolean) => 
                   </button>
                 )}
 
-                {/* Divider + Delete */}
-                {role === "ADMIN" && (
+                {/* Divider + Delete — admin, GM */}
+                {(role === "ADMIN" || role === "GENERAL_MANAGER") && (
                   <>
                     <div className="h-px bg-border my-1" />
                     <button

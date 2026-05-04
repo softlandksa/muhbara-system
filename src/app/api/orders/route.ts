@@ -387,6 +387,7 @@ export async function PATCH(request: NextRequest) {
       select: { id: true, paymentReceiptUrl: true, receipts: { select: { url: true } } },
     });
 
+    console.log("ORDER_DELETE_HARD_DELETE", { ids: targetIds, count: targetIds.length });
     // Hard delete — DB cascade handles OrderItem, OrderAuditLog, ShippingInfo,
     // FollowUpNote, PaymentReceipt. Notification.relatedOrderId is set null by DB.
     await prisma.$transaction(async (tx) => {

@@ -141,6 +141,7 @@ export async function DELETE(
   });
   if (!order) return NextResponse.json({ error: "الطلب غير موجود" }, { status: 404 });
 
+  console.log("ORDER_DELETE_HARD_DELETE", { id, orderId: order.id });
   // Hard delete — cascades OrderItem, OrderAuditLog, ShippingInfo, FollowUpNote,
   // PaymentReceipt (all have onDelete: Cascade). Notification.relatedOrderId is
   // nullable and is set null automatically by DB default (SetNull).

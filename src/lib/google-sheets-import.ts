@@ -266,7 +266,7 @@ export async function runGoogleSheetsImport(
         where: { spreadsheetId },
         select: { externalOrderId: true, status: true, systemOrderId: true },
       }),
-      // Active orders for duplicate phone detection
+      // Active (visible) orders only — soft-deleted orders must not block re-import
       prisma.order.findMany({
         where: { deletedAt: null },
         select: { phone: true },
@@ -274,6 +274,8 @@ export async function runGoogleSheetsImport(
     ]);
 
     if (!initialStatus) throw new Error("حالة 'جاهز للشحن' غير موجودة في إعدادات النظام");
+
+    console.log("SYNC_VISIBLE_ORDERS_COUNT", { visibleOrders: existingOrders.length });
 
     const countryByName  = new Map(countries.map((c) => [lc(c.name), c]));
     const countryByCode  = new Map(countries.map((c) => [lc(c.code), c]));
@@ -457,24 +459,51 @@ export async function runGoogleSheetsImport(
             quantity,
           };
 
-          // ── D. Find existing order ─────────────────────────────────────
+          // ── D. Find existing order (visible/active only) ──────────────
+          // IMPORTANT: only consider orders with deletedAt: null.
+          // A soft-deleted order is invisible in the UI and must be treated
+          // as non-existent so the sheet row can create a fresh order.
           let existingOrder: ExistingOrder | null = null;
 
           if (systemOrderIdInSheet) {
-            existingOrder = await prisma.order.findUnique({
-              where: { orderNumber: systemOrderIdInSheet },
+            existingOrder = await prisma.order.findFirst({
+              where: { orderNumber: systemOrderIdInSheet, deletedAt: null },
               select: ORDER_SELECT,
             }) as ExistingOrder | null;
+
+            if (existingOrder) {
+              console.log("SYNC_EXISTING_ORDER_FOUND", { sheet: sheetName, rowIndex, via: "systemOrderId", orderNumber: existingOrder.orderNumber });
+            } else {
+              // Detect soft-deleted version so we can log it specifically
+              const hiddenCount = await prisma.order.count({
+                where: { orderNumber: systemOrderIdInSheet, deletedAt: { not: null } },
+              });
+              if (hiddenCount > 0) {
+                console.log("SYNC_EXISTING_ORDER_HIDDEN_OR_DELETED", { sheet: sheetName, rowIndex, orderNumber: systemOrderIdInSheet, action: "treating as new" });
+              }
+            }
           }
 
           if (!existingOrder && externalOrderId) {
             const log = importLogByExternalId.get(externalOrderId);
             if (log?.status === "SYNCED" && log.systemOrderId) {
-              existingOrder = await prisma.order.findUnique({
-                where: { id: log.systemOrderId },
+              existingOrder = await prisma.order.findFirst({
+                where: { id: log.systemOrderId, deletedAt: null },
                 select: ORDER_SELECT,
               }) as ExistingOrder | null;
-              // null here means order was hard-deleted → fall through to create
+
+              if (existingOrder) {
+                console.log("SYNC_EXISTING_ORDER_FOUND", { sheet: sheetName, rowIndex, via: "importLog", orderId: log.systemOrderId });
+              } else {
+                // Could be hard-deleted or soft-deleted — check which
+                const hiddenCount = await prisma.order.count({
+                  where: { id: log.systemOrderId, deletedAt: { not: null } },
+                });
+                if (hiddenCount > 0) {
+                  console.log("SYNC_EXISTING_ORDER_HIDDEN_OR_DELETED", { sheet: sheetName, rowIndex, orderId: log.systemOrderId, action: "treating as new" });
+                }
+                // Either way, fall through to create a fresh order
+              }
             }
           }
 
@@ -707,6 +736,7 @@ export async function runGoogleSheetsImport(
           select: { id: true, orderNumber: true, externalOrderId: true },
         });
 
+        console.log("SYNC_DELETE_COUNT", { toDelete: toDelete.length, seenExternalIds: allSeenExternalIds.size });
         console.log(`[GoogleSheetsImport] resync delete phase — ${toDelete.length} orders to hard-delete`);
 
         for (const ord of toDelete) {

@@ -75,7 +75,9 @@
       "Bash(grep -v \"\\\\\\\\[\")",
       "Bash(Select-Object Name)",
       "Bash(dir *)",
-      "Bash(git commit *)"
+      "Bash(git commit *)",
+      "Bash(New-Item *)",
+      "PowerShell(New-Item *)"
     ]
   }
 }

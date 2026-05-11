@@ -7,7 +7,7 @@ import { prisma } from "@/lib/prisma";
 import { format } from "date-fns";
 import { formatOrderDate, formatDateTime } from "@/lib/date-format";
 
-const ALLOWED_ROLES = ["ADMIN", "GENERAL_MANAGER", "SALES_MANAGER", "SALES"] as const;
+const ALLOWED_ROLES = ["ADMIN", "GENERAL_MANAGER", "SALES_MANAGER", "SALES", "SHIPPING"] as const;
 type AllowedRole = (typeof ALLOWED_ROLES)[number];
 
 const MAX_IDS = 5_000;
@@ -16,10 +16,14 @@ const MAX_QUERY_ROWS = 50_000;
 const filterSchema = z.object({
   search: z.string().optional(),
   status: z.array(z.string()).optional().default([]),
+  // New multi-value params
+  country: z.array(z.string()).optional().default([]),
+  employee: z.array(z.string()).optional().default([]),
+  // Legacy single-value params (kept for backward compat)
   countryId: z.array(z.string()).optional().default([]),
+  createdById: z.string().optional(),
   currencyId: z.string().optional(),
   paymentMethodId: z.string().optional(),
-  createdById: z.string().optional(),
   teamId: z.string().optional(),
   dateFrom: z.string().optional(),
   dateTo: z.string().optional(),
@@ -86,14 +90,19 @@ export async function POST(request: NextRequest) {
     exportCount = orderIds.length;
   } else {
     // mode "query" — rebuild WHERE identically to GET /api/orders
-    const filters = parsed.data.filters ?? { status: [], countryId: [] };
+    const filters = parsed.data.filters ?? { status: [], country: [], employee: [], countryId: [] };
     const userFilter: Record<string, unknown> = {};
 
     if (filters.status?.length) userFilter.statusId = { in: filters.status };
-    if (filters.countryId?.length) userFilter.countryId = { in: filters.countryId };
+    // Merge new (country) and legacy (countryId) params
+    const countryIds = [...(filters.country ?? []), ...(filters.countryId ?? [])];
+    if (countryIds.length) userFilter.countryId = { in: countryIds };
     if (filters.currencyId) userFilter.currencyId = filters.currencyId;
     if (filters.paymentMethodId) userFilter.paymentMethodId = filters.paymentMethodId;
-    if (filters.createdById && (role === "ADMIN" || role === "GENERAL_MANAGER" || role === "SALES_MANAGER")) {
+    const canFilterByEmployee = role === "ADMIN" || role === "GENERAL_MANAGER" || role === "SALES_MANAGER";
+    if (filters.employee?.length && canFilterByEmployee) {
+      userFilter.createdById = { in: filters.employee };
+    } else if (filters.createdById && canFilterByEmployee) {
       userFilter.createdById = filters.createdById;
     }
     if ((role === "ADMIN" || role === "GENERAL_MANAGER") && filters.teamId) {

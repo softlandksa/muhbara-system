@@ -8,8 +8,8 @@ import { format } from "date-fns";
 import { formatOrderDate } from "@/lib/date-format";
 import {
   Plus, Download, Upload, Loader2,
-  Filter, X, CalendarIcon, FileDown, AlertCircle, CheckCircle2, Trash2,
-  RefreshCw, ListChecks,
+  SlidersHorizontal, X, CalendarIcon, FileDown, AlertCircle, CheckCircle2, Trash2,
+  RefreshCw, ListChecks, ChevronDown,
 } from "lucide-react";
 import { PaginationArrows } from "@/components/shared/PaginationArrows";
 import { toast } from "sonner";
@@ -21,9 +21,6 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from "@/components/ui/select";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
@@ -81,6 +78,14 @@ type ImportResult = {
   errors: { row: number; error: string }[];
 };
 
+type FiltersApplyPayload = {
+  statuses: string[];
+  countries: string[];
+  employees: string[];
+  dateFrom: string;
+  dateTo: string;
+};
+
 // ─── Import Dialog Error Boundary ─────────────────────────────────────────────
 
 class DialogErrorBoundary extends React.Component<
@@ -96,7 +101,6 @@ class DialogErrorBoundary extends React.Component<
   }
   override componentDidCatch(err: Error) {
     console.error("[ImportDialog] render error:", err);
-    // Defer so the dialog can close before the toast fires
     setTimeout(() => {
       toast.error("حدث خطأ أثناء تحميل نافذة الاستيراد — يرجى المحاولة مرة أخرى");
       this.props.onError();
@@ -127,7 +131,6 @@ function ImportDialog({
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<ImportResult | null>(null);
 
-  // Use a ref to trigger the file input — more reliable inside Dialog portals than htmlFor
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const reset = () => {
@@ -139,8 +142,6 @@ function ImportDialog({
     setLoading(false);
   };
 
-  // ── O(n) per-row duplicate flags ──────────────────────────────────────────
-  // Computed from previewRows + dupPhones; no nested scans per cell render.
   const { rowFlags, inFilePhoneDups, existingPhoneDups, inFileNameDups } = useMemo(() => {
     const normPhone = (r: Record<string, unknown>) => String(r["الجوال"] ?? "").trim();
     const normName  = (r: Record<string, unknown>) => String(r["اسم العميل"] ?? "").trim().toLowerCase();
@@ -163,11 +164,8 @@ function ImportDialog({
 
     return {
       rowFlags: flags,
-      // distinct phone values that repeat inside the file
       inFilePhoneDups: [...phoneCount.entries()].filter(([, c]) => c > 1).length,
-      // phones that exist in the DB (from async check-duplicate)
       existingPhoneDups: Object.keys(dupPhones).length,
-      // distinct name values that repeat inside the file
       inFileNameDups: [...nameCount.entries()].filter(([, c]) => c > 1).length,
     };
   }, [previewRows, dupPhones]);
@@ -178,7 +176,6 @@ function ImportDialog({
     const f = e.target.files?.[0];
     if (!f) return;
 
-    // Validate extension client-side before doing anything heavy
     const ext = f.name.split(".").pop()?.toLowerCase();
     if (ext !== "xlsx" && ext !== "xls") {
       toast.error("الملف غير مدعوم — استخدم .xlsx أو .xls فقط");
@@ -188,8 +185,6 @@ function ImportDialog({
 
     setFile(f);
 
-    // Parse the workbook client-side for preview — wrapped in try/catch so a
-    // malformed file doesn't silently swallow the event.
     let rows: Record<string, unknown>[] = [];
     try {
       const buf = await f.arrayBuffer();
@@ -202,13 +197,10 @@ function ImportDialog({
         return;
       }
 
-      // Prefer the sheet named "الطلبات"; fall back to whichever sheet has the
-      // most required-header matches (handles files with hidden reference sheets).
       const REQUIRED = ["اسم العميل", "الجوال", "العنوان", "الدولة", "العملة", "طريقة الدفع", "المنتج", "الكمية", "السعر"];
-      const norm = (v: unknown) => String(v ?? "").replace(/^\uFEFF/, "").replace(/\s+/g, " ").trim();
+      const norm = (v: unknown) => String(v ?? "").replace(/^﻿/, "").replace(/\s+/g, " ").trim();
 
       let sheetName = wb.SheetNames.find((n) => n === "الطلبات") ?? wb.SheetNames[0];
-      // Scan if exact name not found
       if (sheetName !== "الطلبات") {
         let best = 0;
         for (const name of wb.SheetNames) {
@@ -223,7 +215,6 @@ function ImportDialog({
       const ws = wb.Sheets[sheetName];
       if (!ws) { toast.error("الملف لا يحتوي على أوراق عمل"); e.target.value = ""; return; }
 
-      // Read all rows as arrays to find the true header row (scan first 10 rows)
       const rawAll = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, defval: "" });
       let headerIdx = 0;
       let bestScore = 0;
@@ -237,7 +228,6 @@ function ImportDialog({
       const colMap: Record<string, number> = {};
       headerCells.forEach((h, idx) => { if (h) colMap[h] = idx; });
 
-      // Hint/instruction rows left over from older templates
       const HINT_RE = /\(مطلوب\)|مثال:|اختر من القائمة|رقم صحيح|سعر الوحدة/u;
 
       rows = rawAll
@@ -250,9 +240,7 @@ function ImportDialog({
           return obj;
         })
         .filter((obj) =>
-          // Drop blank rows
           Object.values(obj).some((v) => String(v ?? "").trim() !== "") &&
-          // Drop instruction/hint rows from older templates
           !Object.values(obj).some((v) => HINT_RE.test(String(v ?? "")))
         );
     } catch (err) {
@@ -272,7 +260,6 @@ function ImportDialog({
     setStep("preview");
     e.target.value = "";
 
-    // Batch duplicate check — non-critical; failure is silently ignored
     const phones = rows
       .map((r) => String(r["الجوال"] ?? "").trim())
       .filter(Boolean);
@@ -288,7 +275,7 @@ function ImportDialog({
           setDupPhones(json.data ?? {});
         }
       } catch {
-        // non-critical; skip
+        // non-critical
       }
     }
   };
@@ -313,15 +300,11 @@ function ImportDialog({
       }
       if (json.data) {
         const { created, errors: importErrors } = json.data;
-        if (created > 0) {
-          onDone(); // invalidate orders list
-        }
+        if (created > 0) onDone();
         if (importErrors.length === 0) {
-          // Clean import — close dialog and show toast
           toast.success(`تم استيراد ${created} طلب بنجاح`);
           handleClose();
         } else {
-          // Partial or full failure — show result step so user can see per-row errors
           setResult(json.data);
           setStep("result");
           if (created > 0) {
@@ -355,17 +338,10 @@ function ImportDialog({
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && handleClose()}>
-      {/*
-       * flex flex-col + max-h-[90dvh]: caps dialog height so footer is always
-       * on screen; overrides the base "grid" class via tailwind-merge.
-       */}
       <DialogContent dir="rtl" className="max-w-2xl flex flex-col max-h-[90dvh]">
         <DialogErrorBoundary onError={handleClose}>
-          {/* Absolute loading overlay — sits over the whole popup (popup is `fixed`,
-              so `absolute inset-0` covers it without a wrapping `relative` div) */}
           <AppLoadingOverlay open={loading} mode="inline" message="جاري استيراد الطلبات..." />
 
-          {/* ── Header (pinned, never scrolls) ──────────────────────────────── */}
           <DialogHeader className="shrink-0">
             <DialogTitle className="flex items-center gap-2">
               <Upload className="h-4 w-4" />
@@ -373,7 +349,6 @@ function ImportDialog({
             </DialogTitle>
           </DialogHeader>
 
-          {/* Hidden file input */}
           <input
             ref={fileInputRef}
             type="file"
@@ -382,7 +357,6 @@ function ImportDialog({
             onChange={handleFileChange}
           />
 
-          {/* ── Scrollable body (grows, shrinks, scrolls internally) ────────── */}
           <div className="flex-1 min-h-0 overflow-y-auto space-y-4 py-1">
 
             {step === "upload" && (
@@ -441,7 +415,6 @@ function ImportDialog({
                   </button>
                 </div>
 
-                {/* ── Duplicate warning banner ───────────────────────────── */}
                 {(inFilePhoneDups > 0 || existingPhoneDups > 0 || inFileNameDups > 0) && (
                   <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg bg-amber-50 border border-amber-200 text-sm text-amber-800">
                     <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
@@ -464,7 +437,6 @@ function ImportDialog({
                   </div>
                 )}
 
-                {/* ── Legend (shown only when there are highlighted cells) ── */}
                 {(inFilePhoneDups > 0 || existingPhoneDups > 0 || inFileNameDups > 0) && (
                   <div className="flex items-center gap-3 text-xs text-muted-foreground select-none" aria-hidden="true">
                     <span className="flex items-center gap-1.5">
@@ -479,15 +451,6 @@ function ImportDialog({
                   </div>
                 )}
 
-                {/*
-                 * Preview table — plain <table> (not the Table UI component) to
-                 * avoid the nested overflow-x-auto wrapper that fights RTL layout.
-                 *
-                 * Scroll wrapper: dir="rtl" matches dialog direction so horizontal
-                 * overflow extends to the left (less-important columns) not the right.
-                 * min-w-max on <table> forces it to its natural content width and lets
-                 * the wrapper show a horizontal scrollbar when needed.
-                 */}
                 <div className="max-h-52 overflow-auto rounded-lg border text-xs" dir="rtl">
                   <table className="min-w-max w-full border-collapse">
                     <thead className="bg-muted/40 sticky top-0 z-10">
@@ -507,7 +470,6 @@ function ImportDialog({
                             key={i}
                             className={cn(
                               "border-b last:border-0 hover:bg-muted/20",
-                              // RTL leading-edge indicator: border-r is the visual start in dir="rtl"
                               hasAnyDup && "border-r-2 border-r-amber-400"
                             )}
                           >
@@ -616,7 +578,6 @@ function ImportDialog({
             )}
           </div>
 
-          {/* ── Footer (pinned, never scrolls) ──────────────────────────────── */}
           <DialogFooter className="gap-2 shrink-0">
             <Button type="button" variant="outline" onClick={handleClose}>إغلاق</Button>
             {step === "preview" && (
@@ -678,7 +639,7 @@ function BulkStatusDialog({
     <Dialog open={open} onOpenChange={(o) => !o && handleClose()}>
       <DialogContent dir="rtl" className="max-w-sm">
         <DialogHeader>
-          <DialogTitle>تغيير حالة {count} طلب</DialogTitle>
+          <DialogTitle>تغيير حالة {count.toLocaleString("ar")} طلب</DialogTitle>
         </DialogHeader>
         <div className="space-y-2">
           <Label>الحالة الجديدة</Label>
@@ -694,6 +655,379 @@ function BulkStatusDialog({
           <Button onClick={handleSubmit} disabled={!statusId || loading}>
             {loading && <Loader2 className="h-4 w-4 animate-spin ml-1" />}
             تأكيد
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ─── Filter Chip ──────────────────────────────────────────────────────────────
+
+function FilterChip({
+  label,
+  color,
+  onRemove,
+}: {
+  label: string;
+  color?: string;
+  onRemove: () => void;
+}) {
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1.5 pl-2 pr-1.5 py-1 rounded-full border text-xs font-medium",
+        !color && "bg-primary/10 text-primary border-primary/25"
+      )}
+      style={
+        color
+          ? { backgroundColor: color + "18", color, borderColor: color + "55" }
+          : undefined
+      }
+    >
+      {color && (
+        <span className="h-2 w-2 rounded-full shrink-0" style={{ backgroundColor: color }} />
+      )}
+      {label}
+      <button
+        type="button"
+        onClick={onRemove}
+        className="hover:opacity-70 transition-opacity shrink-0"
+        aria-label="إزالة الفلتر"
+      >
+        <X className="h-3 w-3" />
+      </button>
+    </span>
+  );
+}
+
+// ─── Multi-Check Section (inside FiltersModal) ─────────────────────────────────
+
+function MultiCheckSection({
+  title,
+  items,
+  selected,
+  onToggle,
+  onToggleAll,
+  searchPlaceholder,
+  selectedLabel,
+}: {
+  title: string;
+  items: { value: string; label: string; color?: string }[];
+  selected: string[];
+  onToggle: (value: string) => void;
+  onToggleAll: (wasAllSelected: boolean) => void;
+  searchPlaceholder: string;
+  selectedLabel?: (count: number) => string;
+}) {
+  const [search, setSearch] = useState("");
+
+  const filtered = useMemo(
+    () =>
+      search.trim()
+        ? items.filter((i) =>
+            i.label.toLowerCase().includes(search.toLowerCase())
+          )
+        : items,
+    [items, search]
+  );
+
+  const allSelected = items.length > 0 && items.every((i) => selected.includes(i.value));
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <span className="text-sm font-semibold text-foreground">{title}</span>
+        {selected.length > 0 && (
+          <span className="text-[11px] bg-primary/10 text-primary px-2 py-0.5 rounded-full font-medium">
+            {selectedLabel ? selectedLabel(selected.length) : `${selected.length} محدد`}
+          </span>
+        )}
+      </div>
+      <div className="border rounded-xl overflow-hidden shadow-sm">
+        <div className="p-2 border-b bg-muted/30">
+          <input
+            type="text"
+            placeholder={searchPlaceholder}
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="w-full px-3 py-1.5 text-sm bg-background border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/30 transition-all placeholder:text-muted-foreground/60"
+            dir="rtl"
+          />
+        </div>
+        <div className="max-h-44 overflow-y-auto p-1.5 space-y-0.5">
+          {items.length > 0 && (
+            <label className="flex items-center gap-2.5 px-2 py-1.5 rounded-lg hover:bg-muted cursor-pointer select-none group">
+              <Checkbox
+                checked={allSelected}
+                onCheckedChange={() => onToggleAll(allSelected)}
+                className="shrink-0"
+              />
+              <span className="text-sm font-medium text-muted-foreground group-hover:text-foreground">
+                تحديد الكل
+              </span>
+            </label>
+          )}
+          {filtered.length === 0 && (
+            <p className="text-center py-3 text-sm text-muted-foreground">لا توجد نتائج</p>
+          )}
+          {filtered.map((item) => (
+            <label
+              key={item.value}
+              className="flex items-center gap-2.5 px-2 py-1.5 rounded-lg hover:bg-muted cursor-pointer select-none group"
+            >
+              <Checkbox
+                checked={selected.includes(item.value)}
+                onCheckedChange={() => onToggle(item.value)}
+                className="shrink-0"
+              />
+              <span className="flex items-center gap-2 text-sm flex-1 min-w-0">
+                {item.color && (
+                  <span
+                    className="h-2.5 w-2.5 rounded-full shrink-0"
+                    style={{ backgroundColor: item.color }}
+                  />
+                )}
+                <span className="truncate">{item.label}</span>
+              </span>
+            </label>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Filters Modal ─────────────────────────────────────────────────────────────
+
+function FiltersModal({
+  open,
+  onClose,
+  statuses,
+  countries,
+  employees,
+  canFilterByEmployee,
+  canFilterByCountry,
+  currentStatuses,
+  currentCountries,
+  currentEmployees,
+  currentDateFrom,
+  currentDateTo,
+  onApply,
+  onClear,
+}: {
+  open: boolean;
+  onClose: () => void;
+  statuses: StatusItem[];
+  countries: { id: string; name: string }[];
+  employees: { id: string; name: string }[];
+  canFilterByEmployee: boolean;
+  canFilterByCountry: boolean;
+  currentStatuses: string[];
+  currentCountries: string[];
+  currentEmployees: string[];
+  currentDateFrom: string;
+  currentDateTo: string;
+  onApply: (payload: FiltersApplyPayload) => void;
+  onClear: () => void;
+}) {
+  const [tempStatuses, setTempStatuses] = useState(currentStatuses);
+  const [tempCountries, setTempCountries] = useState(currentCountries);
+  const [tempEmployees, setTempEmployees] = useState(currentEmployees);
+  const [tempDateFrom, setTempDateFrom] = useState(currentDateFrom);
+  const [tempDateTo, setTempDateTo] = useState(currentDateTo);
+  const [dateFromOpen, setDateFromOpen] = useState(false);
+  const [dateToOpen, setDateToOpen] = useState(false);
+
+  useEffect(() => {
+    if (open) {
+      setTempStatuses(currentStatuses);
+      setTempCountries(currentCountries);
+      setTempEmployees(currentEmployees);
+      setTempDateFrom(currentDateFrom);
+      setTempDateTo(currentDateTo);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  const toggleStatus = (id: string) =>
+    setTempStatuses((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
+  const toggleCountry = (id: string) =>
+    setTempCountries((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
+  const toggleEmployee = (id: string) =>
+    setTempEmployees((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
+
+  const totalSelected =
+    tempStatuses.length +
+    tempCountries.length +
+    tempEmployees.length +
+    (tempDateFrom ? 1 : 0) +
+    (tempDateTo ? 1 : 0);
+
+  const handleApply = () => {
+    onApply({
+      statuses: tempStatuses,
+      countries: tempCountries,
+      employees: tempEmployees,
+      dateFrom: tempDateFrom,
+      dateTo: tempDateTo,
+    });
+  };
+
+  const handleClear = () => {
+    setTempStatuses([]);
+    setTempCountries([]);
+    setTempEmployees([]);
+    setTempDateFrom("");
+    setTempDateTo("");
+    onClear();
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent dir="rtl" className="max-w-lg flex flex-col max-h-[90dvh]">
+        <DialogHeader className="shrink-0">
+          <DialogTitle className="flex items-center gap-2">
+            <SlidersHorizontal className="h-4 w-4" />
+            الفلاتر
+            {totalSelected > 0 && (
+              <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-primary text-primary-foreground text-[10px] font-bold px-1.5">
+                {totalSelected}
+              </span>
+            )}
+          </DialogTitle>
+        </DialogHeader>
+
+        <div className="flex-1 min-h-0 overflow-y-auto space-y-5 py-2 px-1">
+          {/* Shipping Status */}
+          <MultiCheckSection
+            title="حالة الشحن"
+            items={statuses.map((s) => ({ value: s.id, label: s.name, color: s.color }))}
+            selected={tempStatuses}
+            onToggle={toggleStatus}
+            onToggleAll={(allSelected) =>
+              setTempStatuses(allSelected ? [] : statuses.map((s) => s.id))
+            }
+            searchPlaceholder="ابحث عن حالة..."
+            selectedLabel={(n) => `${n} حالة محددة`}
+          />
+
+          {/* Country */}
+          {canFilterByCountry && (
+            <MultiCheckSection
+              title="الدولة"
+              items={countries.map((c) => ({ value: c.id, label: c.name }))}
+              selected={tempCountries}
+              onToggle={toggleCountry}
+              onToggleAll={(allSelected) =>
+                setTempCountries(allSelected ? [] : countries.map((c) => c.id))
+              }
+              searchPlaceholder="ابحث عن دولة..."
+              selectedLabel={(n) => `${n === 1 ? "دولة واحدة" : n + " دول"} محددة`}
+            />
+          )}
+
+          {/* Employee */}
+          {canFilterByEmployee && (
+            <MultiCheckSection
+              title="الموظف"
+              items={employees.map((e) => ({ value: e.id, label: e.name }))}
+              selected={tempEmployees}
+              onToggle={toggleEmployee}
+              onToggleAll={(allSelected) =>
+                setTempEmployees(allSelected ? [] : employees.map((e) => e.id))
+              }
+              searchPlaceholder="ابحث عن موظف..."
+              selectedLabel={(n) => `${n} موظف محدد`}
+            />
+          )}
+
+          {/* Date Range */}
+          <div className="space-y-2">
+            <span className="text-sm font-semibold text-foreground">نطاق التاريخ</span>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label className="text-xs text-muted-foreground">من تاريخ</Label>
+                <Popover open={dateFromOpen} onOpenChange={setDateFromOpen}>
+                  <PopoverTrigger
+                    className={cn(
+                      "flex h-9 w-full items-center justify-between rounded-lg border border-input bg-transparent px-3 py-2 text-sm transition-colors hover:bg-muted/30",
+                      tempDateFrom ? "text-foreground" : "text-muted-foreground"
+                    )}
+                  >
+                    <span>{tempDateFrom || "اختر تاريخاً"}</span>
+                    <CalendarIcon className="h-4 w-4 opacity-40" />
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0" align="start">
+                    <Calendar
+                      mode="single"
+                      selected={tempDateFrom ? new Date(tempDateFrom) : undefined}
+                      onDayClick={(d) => {
+                        setTempDateFrom(format(d, "yyyy-MM-dd"));
+                        setDateFromOpen(false);
+                      }}
+                    />
+                    {tempDateFrom && (
+                      <div className="p-2 border-t">
+                        <button
+                          type="button"
+                          className="w-full text-xs text-muted-foreground hover:text-foreground text-center"
+                          onClick={() => { setTempDateFrom(""); setDateFromOpen(false); }}
+                        >
+                          مسح التاريخ
+                        </button>
+                      </div>
+                    )}
+                  </PopoverContent>
+                </Popover>
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs text-muted-foreground">إلى تاريخ</Label>
+                <Popover open={dateToOpen} onOpenChange={setDateToOpen}>
+                  <PopoverTrigger
+                    className={cn(
+                      "flex h-9 w-full items-center justify-between rounded-lg border border-input bg-transparent px-3 py-2 text-sm transition-colors hover:bg-muted/30",
+                      tempDateTo ? "text-foreground" : "text-muted-foreground"
+                    )}
+                  >
+                    <span>{tempDateTo || "اختر تاريخاً"}</span>
+                    <CalendarIcon className="h-4 w-4 opacity-40" />
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0" align="start">
+                    <Calendar
+                      mode="single"
+                      selected={tempDateTo ? new Date(tempDateTo) : undefined}
+                      onDayClick={(d) => {
+                        setTempDateTo(format(d, "yyyy-MM-dd"));
+                        setDateToOpen(false);
+                      }}
+                    />
+                    {tempDateTo && (
+                      <div className="p-2 border-t">
+                        <button
+                          type="button"
+                          className="w-full text-xs text-muted-foreground hover:text-foreground text-center"
+                          onClick={() => { setTempDateTo(""); setDateToOpen(false); }}
+                        >
+                          مسح التاريخ
+                        </button>
+                      </div>
+                    )}
+                  </PopoverContent>
+                </Popover>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <DialogFooter className="gap-2 shrink-0 border-t pt-4 flex-row">
+          <Button variant="outline" className="flex-1" onClick={handleClear}>
+            <X className="h-4 w-4 ml-1.5" />
+            إلغاء الفلاتر
+          </Button>
+          <Button className="flex-1" onClick={handleApply}>
+            <SlidersHorizontal className="h-4 w-4 ml-1.5" />
+            تطبيق الفلاتر
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -724,8 +1058,10 @@ function OrdersPageInner({ setImportOpen }: { setImportOpen: (open: boolean) => 
     if (statusesError) toast.error("فشل تحميل قائمة الحالات");
   }, [statusesError]);
 
-  // ── Users lookup (for employee filter — managers/admins only) ──
-  const canFilterByEmployee = role === "ADMIN" || role === "GENERAL_MANAGER" || role === "SALES_MANAGER";
+  // ── Users lookup (employee filter — managers/admins only) ──
+  const canFilterByEmployee =
+    role === "ADMIN" || role === "GENERAL_MANAGER" || role === "SALES_MANAGER";
+
   const { data: usersData, isLoading: usersLoading } = useQuery<{ id: string; name: string; role: string }[]>({
     queryKey: ["lookup-users-filter", role, session?.user?.teamId],
     queryFn: async () => {
@@ -744,11 +1080,13 @@ function OrdersPageInner({ setImportOpen }: { setImportOpen: (open: boolean) => 
   });
   const filterableUsers = usersData ?? [];
 
-  // ── Countries lookup (admin only — for country filter) ──
+  // ── Countries lookup (admin/GM only) ──
+  const canFilterByCountry = role === "ADMIN" || role === "GENERAL_MANAGER";
+
   const { data: countriesData } = useQuery<{ data: { id: string; name: string }[] }>({
     queryKey: ["lookup-countries"],
     queryFn: () => fetch("/api/lookup/countries").then((r) => r.json()),
-    enabled: role === "ADMIN",
+    enabled: canFilterByCountry,
     staleTime: 5 * 60 * 1000,
   });
   const filterableCountries = countriesData?.data ?? [];
@@ -756,43 +1094,29 @@ function OrdersPageInner({ setImportOpen }: { setImportOpen: (open: boolean) => 
   // ── URL state ──
   const page = parseInt(searchParams.get("page") ?? "1");
   const searchQ = searchParams.get("search") ?? "";
-  const statusParams = searchParams.getAll("status");
+  const statusIds = searchParams.getAll("status");
+  const countryIds = searchParams.getAll("country");
+  const employeeIds = searchParams.getAll("employee");
   const dateFrom = searchParams.get("dateFrom") ?? "";
   const dateTo = searchParams.get("dateTo") ?? "";
-  const createdByIdParam = searchParams.get("createdById") ?? "";
-  const countryIdParam = searchParams.get("countryId") ?? "";
+
+  const hasActiveFilters =
+    statusIds.length > 0 || countryIds.length > 0 || employeeIds.length > 0 || !!dateFrom || !!dateTo;
+  const activeFilterCount =
+    statusIds.length + countryIds.length + employeeIds.length + (dateFrom ? 1 : 0) + (dateTo ? 1 : 0);
 
   // ── Local state ──
   const [searchInput, setSearchInput] = useState(searchQ);
+  const [filterModalOpen, setFilterModalOpen] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [selectAllFiltered, setSelectAllFiltered] = useState(false);
+  const [selectLimitedCount, setSelectLimitedCount] = useState<number | null>(null);
   const [bulkMenuOpen, setBulkMenuOpen] = useState(false);
-  const [filterOpen, setFilterOpen] = useState(false);
-  const [dateFromOpen, setDateFromOpen] = useState(false);
-  const [dateToOpen, setDateToOpen] = useState(false);
-
-  // Temporary filter state — only committed to URL when user clicks "تطبيق الفلتر"
-  const [tempStatus, setTempStatus] = useState(statusParams[0] ?? "");
-  const [tempDateFrom, setTempDateFrom] = useState(dateFrom);
-  const [tempDateTo, setTempDateTo] = useState(dateTo);
-  const [tempCreatedById, setTempCreatedById] = useState(createdByIdParam);
-  const [tempCountryId, setTempCountryId] = useState(countryIdParam);
   const [exportLoading, setExportLoading] = useState(false);
   const [bulkStatusOpen, setBulkStatusOpen] = useState(false);
   const [bulkDeleteConfirm, setBulkDeleteConfirm] = useState(false);
   const [bulkDeleteLoading, setBulkDeleteLoading] = useState(false);
   const [exportFilterConfirmOpen, setExportFilterConfirmOpen] = useState(false);
-
-  // Sync temp filter state from URL each time the popover opens
-  useEffect(() => {
-    if (filterOpen) {
-      setTempStatus(statusParams[0] ?? "");
-      setTempDateFrom(dateFrom);
-      setTempDateTo(dateTo);
-      setTempCreatedById(createdByIdParam);
-      setTempCountryId(countryIdParam);
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filterOpen]);
 
   // ── Debounce search ──
   useEffect(() => {
@@ -804,13 +1128,13 @@ function OrdersPageInner({ setImportOpen }: { setImportOpen: (open: boolean) => 
       router.replace(`${pathname}?${params.toString()}`);
     }, 300);
     return () => clearTimeout(t);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchInput]);
 
   const updateParam = useCallback((key: string, value: string | null) => {
     const params = new URLSearchParams(searchParams.toString());
     if (value) params.set(key, value);
     else params.delete(key);
-    // Only reset to page 1 when changing a filter, not when navigating pages
     if (key !== "page") params.set("page", "1");
     router.replace(`${pathname}?${params.toString()}`);
   }, [searchParams, pathname, router]);
@@ -829,18 +1153,41 @@ function OrdersPageInner({ setImportOpen }: { setImportOpen: (open: boolean) => 
 
   // ── Selection ──
   const allIds = data?.data.map((o) => o.id) ?? [];
-  const allSelected = allIds.length > 0 && allIds.every((id) => selected.has(id));
+  const allPageSelected =
+    allIds.length > 0 && allIds.every((id) => selected.has(id));
 
-  const clearSelection = () => {
+  const hasSelection = selected.size > 0 || selectAllFiltered || selectLimitedCount !== null;
+
+  const selectedCount = selectAllFiltered
+    ? (data?.total ?? 0)
+    : selectLimitedCount !== null
+      ? selectLimitedCount
+      : selected.size;
+
+  const clearSelection = useCallback(() => {
     setSelected(new Set());
-  };
+    setSelectAllFiltered(false);
+    setSelectLimitedCount(null);
+  }, []);
 
   const toggleAll = () => {
-    if (allSelected) {
-      setSelected((prev) => { const n = new Set(prev); allIds.forEach((id) => n.delete(id)); return n; });
+    if (selectAllFiltered || selectLimitedCount !== null) {
+      clearSelection();
       return;
     }
-    setSelected((prev) => { const n = new Set(prev); allIds.forEach((id) => n.add(id)); return n; });
+    if (allPageSelected) {
+      setSelected((prev) => {
+        const n = new Set(prev);
+        allIds.forEach((id) => n.delete(id));
+        return n;
+      });
+      return;
+    }
+    setSelected((prev) => {
+      const n = new Set(prev);
+      allIds.forEach((id) => n.add(id));
+      return n;
+    });
   };
 
   const toggleOne = (id: string) => {
@@ -851,12 +1198,11 @@ function OrdersPageInner({ setImportOpen }: { setImportOpen: (open: boolean) => 
     });
   };
 
-  const buildBulkPayload = (action: "status" | "delete", statusId?: string) => ({
-    action,
-    scope: "ids" as const,
-    ids: Array.from(selected),
-    ...(statusId && { statusId }),
-  });
+  const selectFirst = (n: number) => {
+    setSelectLimitedCount(n);
+    setSelectAllFiltered(false);
+    setSelected(new Set());
+  };
 
   // ── Helpers ──
   const downloadBlob = (blob: Blob, filename: string) => {
@@ -868,17 +1214,24 @@ function OrdersPageInner({ setImportOpen }: { setImportOpen: (open: boolean) => 
     URL.revokeObjectURL(url);
   };
 
-  const buildFilters = () => ({
+  const buildFilters = useCallback(() => ({
     search: searchParams.get("search") || undefined,
     status: searchParams.getAll("status"),
-    countryId: searchParams.getAll("countryId"),
-    currencyId: searchParams.get("currencyId") || undefined,
-    paymentMethodId: searchParams.get("paymentMethodId") || undefined,
-    createdById: searchParams.get("createdById") || undefined,
-    teamId: searchParams.get("teamId") || undefined,
+    country: searchParams.getAll("country"),
+    employee: searchParams.getAll("employee"),
     dateFrom: searchParams.get("dateFrom") || undefined,
     dateTo: searchParams.get("dateTo") || undefined,
-  });
+  }), [searchParams]);
+
+  const buildBulkPayload = (action: "status" | "delete", statusId?: string) => {
+    if (selectAllFiltered) {
+      return { action, scope: "all" as const, filters: buildFilters(), ...(statusId && { statusId }) };
+    }
+    if (selectLimitedCount !== null) {
+      return { action, scope: "limited" as const, limit: selectLimitedCount, filters: buildFilters(), ...(statusId && { statusId }) };
+    }
+    return { action, scope: "ids" as const, ids: Array.from(selected), ...(statusId && { statusId }) };
+  };
 
   // ── Template download ──
   const handleTemplateDownload = async () => {
@@ -886,18 +1239,13 @@ function OrdersPageInner({ setImportOpen }: { setImportOpen: (open: boolean) => 
       const res = await fetch("/api/orders/template");
       if (!res.ok) { toast.error("فشل تحميل النموذج"); return; }
       const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = "نموذج_الطلبات.xlsx";
-      a.click();
-      URL.revokeObjectURL(url);
+      downloadBlob(blob, "نموذج_الطلبات.xlsx");
     } catch {
       toast.error("فشل تحميل النموذج");
     }
   };
 
-  // ── Export all matching filters (mode B) — used by header button and banner ──
+  // ── Export all matching filters ──
   const handleExportFiltered = async (confirmed = false) => {
     const total = data?.total ?? 0;
     if (!confirmed && total > EXPORT_WARN_THRESHOLD) {
@@ -923,8 +1271,11 @@ function OrdersPageInner({ setImportOpen }: { setImportOpen: (open: boolean) => 
     }
   };
 
-  // ── Export selected IDs (mode A) ──
+  // ── Export selected / all filtered ──
   const handleExportSelected = async () => {
+    if (selectAllFiltered || selectLimitedCount !== null) {
+      return handleExportFiltered(true);
+    }
     setExportLoading(true);
     try {
       const res = await fetch("/api/orders/export", {
@@ -980,47 +1331,67 @@ function OrdersPageInner({ setImportOpen }: { setImportOpen: (open: boolean) => 
     }
   };
 
-  const hasActiveFilters =
-    statusParams.length > 0 || dateFrom || dateTo || !!createdByIdParam || !!countryIdParam;
+  // ── Filter actions ──
+  const applyFilters = useCallback(
+    ({ statuses: s, countries: c, employees: e, dateFrom: df, dateTo: dt }: FiltersApplyPayload) => {
+      const params = new URLSearchParams(searchParams.toString());
+      params.delete("status");
+      params.delete("country");
+      params.delete("employee");
+      params.delete("dateFrom");
+      params.delete("dateTo");
+      s.forEach((v) => params.append("status", v));
+      c.forEach((v) => params.append("country", v));
+      e.forEach((v) => params.append("employee", v));
+      if (df) params.set("dateFrom", df);
+      if (dt) params.set("dateTo", dt);
+      params.set("page", "1");
+      router.replace(`${pathname}?${params.toString()}`);
+      setFilterModalOpen(false);
+      clearSelection();
+    },
+    [searchParams, pathname, router, clearSelection]
+  );
 
-  const applyFilters = () => {
+  const clearFilters = useCallback(() => {
     const params = new URLSearchParams(searchParams.toString());
     params.delete("status");
-    if (tempStatus) params.append("status", tempStatus);
-    if (tempDateFrom) params.set("dateFrom", tempDateFrom);
-    else params.delete("dateFrom");
-    if (tempDateTo) params.set("dateTo", tempDateTo);
-    else params.delete("dateTo");
-    if (tempCreatedById) params.set("createdById", tempCreatedById);
-    else params.delete("createdById");
-    if (tempCountryId) params.set("countryId", tempCountryId);
-    else params.delete("countryId");
-    params.set("page", "1");
-    router.replace(`${pathname}?${params.toString()}`);
-    setFilterOpen(false);
-  };
-
-  const clearFilters = () => {
-    setTempStatus("");
-    setTempDateFrom("");
-    setTempDateTo("");
-    setTempCreatedById("");
-    setTempCountryId("");
-    const params = new URLSearchParams(searchParams.toString());
-    params.delete("status");
+    params.delete("country");
+    params.delete("employee");
     params.delete("dateFrom");
     params.delete("dateTo");
-    params.delete("createdById");
-    params.delete("countryId");
     params.set("page", "1");
     router.replace(`${pathname}?${params.toString()}`);
-    setFilterOpen(false);
-  };
+    setFilterModalOpen(false);
+    clearSelection();
+  }, [searchParams, pathname, router, clearSelection]);
+
+  const removeFilter = useCallback(
+    (type: "status" | "country" | "employee", id: string) => {
+      const params = new URLSearchParams(searchParams.toString());
+      const current = params.getAll(type).filter((v) => v !== id);
+      params.delete(type);
+      current.forEach((v) => params.append(type, v));
+      params.set("page", "1");
+      router.replace(`${pathname}?${params.toString()}`);
+      clearSelection();
+    },
+    [searchParams, pathname, router, clearSelection]
+  );
+
+  const removeDateFilter = useCallback(() => {
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete("dateFrom");
+    params.delete("dateTo");
+    params.set("page", "1");
+    router.replace(`${pathname}?${params.toString()}`);
+  }, [searchParams, pathname, router]);
 
   return (
     <div className="p-6 space-y-4" dir="rtl">
       <AppLoadingOverlay open={exportLoading} message="جاري تصدير البيانات..." />
-      {/* Header */}
+
+      {/* ── Header ── */}
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">الطلبات</h1>
         <div className="flex items-center gap-2">
@@ -1056,11 +1427,10 @@ function OrdersPageInner({ setImportOpen }: { setImportOpen: (open: boolean) => 
         </div>
       </div>
 
-      {/* Search + Filter + Bulk Actions */}
-      <div className="flex items-center gap-2 justify-between">
-        <div className="flex items-center gap-2">
+      {/* ── Search + Filters Button ── */}
+      <div className="flex items-center gap-2 flex-wrap">
         <SearchInput
-          className="w-[30%] min-w-[220px]"
+          className="w-[280px]"
           placeholder="بحث برقم الطلب أو اسم العميل أو الجوال..."
           value={searchInput}
           onChange={setSearchInput}
@@ -1068,231 +1438,200 @@ function OrdersPageInner({ setImportOpen }: { setImportOpen: (open: boolean) => 
           dir="rtl"
         />
 
-        <Popover open={filterOpen} onOpenChange={setFilterOpen}>
-          <PopoverTrigger
-            className={cn(
-              "inline-flex h-7 items-center gap-1 rounded-[min(var(--radius-md),12px)] border border-border bg-background px-2.5 text-[0.8rem] font-medium hover:bg-muted",
-              hasActiveFilters && "border-primary text-primary"
-            )}
-          >
-            <Filter className="h-3.5 w-3.5" />
-            {hasActiveFilters && <span>فلتر</span>}
-          </PopoverTrigger>
-          <PopoverContent className="w-80 p-4 space-y-4" align="end">
-            {/* Status dropdown */}
-            <div className="space-y-2">
-              <Label className="text-sm font-medium">الحالة</Label>
-              {statusesLoading ? (
-                <Skeleton className="h-9 w-full" />
-              ) : (
-                <Select value={tempStatus} onValueChange={(v) => setTempStatus(v ?? "")}>
-                  <SelectTrigger className="w-full">
-                    <SelectValue placeholder="كل الحالات" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="">كل الحالات</SelectItem>
-                    {statuses.map((s) => (
-                      <SelectItem key={s.id} value={s.id}>
-                        <span className="flex items-center gap-2">
-                          <span className="h-2.5 w-2.5 rounded-full shrink-0 inline-block" style={{ backgroundColor: s.color }} />
-                          <span style={{ color: s.color }}>{s.name}</span>
-                        </span>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              )}
-            </div>
-
-            {/* From date */}
-            <div className="space-y-2">
-              <Label className="text-sm font-medium">من تاريخ</Label>
-              <Popover open={dateFromOpen} onOpenChange={setDateFromOpen}>
-                <PopoverTrigger
-                  className="flex h-9 w-full items-center justify-between rounded-lg border border-input bg-transparent px-3 py-2 text-sm"
-                >
-                  <span className={tempDateFrom ? "" : "text-muted-foreground"}>{tempDateFrom || "اختر تاريخاً"}</span>
-                  <CalendarIcon className="h-4 w-4 opacity-50" />
-                </PopoverTrigger>
-                <PopoverContent className="w-auto p-0">
-                  <Calendar
-                    mode="single"
-                    selected={tempDateFrom ? new Date(tempDateFrom) : undefined}
-                    onDayClick={(d) => { setTempDateFrom(format(d, "yyyy-MM-dd")); setDateFromOpen(false); }}
-                  />
-                </PopoverContent>
-              </Popover>
-            </div>
-
-            {/* To date */}
-            <div className="space-y-2">
-              <Label className="text-sm font-medium">إلى تاريخ</Label>
-              <Popover open={dateToOpen} onOpenChange={setDateToOpen}>
-                <PopoverTrigger
-                  className="flex h-9 w-full items-center justify-between rounded-lg border border-input bg-transparent px-3 py-2 text-sm"
-                >
-                  <span className={tempDateTo ? "" : "text-muted-foreground"}>{tempDateTo || "اختر تاريخاً"}</span>
-                  <CalendarIcon className="h-4 w-4 opacity-50" />
-                </PopoverTrigger>
-                <PopoverContent className="w-auto p-0">
-                  <Calendar
-                    mode="single"
-                    selected={tempDateTo ? new Date(tempDateTo) : undefined}
-                    onDayClick={(d) => { setTempDateTo(format(d, "yyyy-MM-dd")); setDateToOpen(false); }}
-                  />
-                </PopoverContent>
-              </Popover>
-            </div>
-
-            {/* Employee filter — managers/admins only */}
-            {canFilterByEmployee && (
-              <div className="space-y-2">
-                <Label className="text-sm font-medium">الموظف</Label>
-                {usersLoading ? (
-                  <Skeleton className="h-9 w-full" />
-                ) : (
-                  <SearchableSelect
-                    options={[
-                      { value: "", label: "كل الموظفين" },
-                      ...filterableUsers.map((u) => ({ value: u.id, label: u.name })),
-                    ]}
-                    value={tempCreatedById}
-                    onChange={(v) => setTempCreatedById(v || "")}
-                    placeholder="كل الموظفين"
-                  />
-                )}
-              </div>
-            )}
-
-            {/* Country filter — admin only */}
-            {role === "ADMIN" && (
-              <div className="space-y-2">
-                <Label className="text-sm font-medium">الدولة</Label>
-                <Select value={tempCountryId} onValueChange={(v) => setTempCountryId(v ?? "")}>
-                  <SelectTrigger className="w-full">
-                    <SelectValue placeholder="كل الدول" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="">كل الدول</SelectItem>
-                    {filterableCountries.map((c) => (
-                      <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
-
-            {/* Action buttons */}
-            <div className="flex flex-col gap-2 pt-1 border-t">
-              <Button size="sm" className="w-full" onClick={applyFilters}>
-                تطبيق الفلتر
-              </Button>
-              <Button variant="outline" size="sm" className="w-full" onClick={clearFilters}>
-                <X className="h-3 w-3 ml-1" />
-                إلغاء الفلتر
-              </Button>
-            </div>
-          </PopoverContent>
-        </Popover>
-
-        {/* Active country chip */}
-        {role === "ADMIN" && countryIdParam && (
-          <span className="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full bg-primary/10 text-primary border border-primary/20 font-medium">
-            الدولة: {filterableCountries.find((c) => c.id === countryIdParam)?.name ?? countryIdParam}
-            <button
-              type="button"
-              onClick={() => {
-                setTempCountryId("");
-                const params = new URLSearchParams(searchParams.toString());
-                params.delete("countryId");
-                params.set("page", "1");
-                router.replace(`${pathname}?${params.toString()}`);
-              }}
-              className="hover:opacity-70 transition-opacity ml-0.5"
-            >
-              <X className="h-3 w-3" />
-            </button>
-          </span>
-        )}
-        </div>
-
-        {/* ── Bulk Actions ── */}
-        {selected.size > 0 && (
-          <div dir="rtl" className="flex items-center gap-2">
-            <span className="text-sm text-muted-foreground">
-              {selected.size === 1 ? "طلب واحد محدد" : `${selected.size} طلبات محددة`}
+        <Button
+          variant={hasActiveFilters ? "default" : "outline"}
+          size="sm"
+          onClick={() => setFilterModalOpen(true)}
+          className="gap-1.5 h-9"
+          disabled={statusesLoading}
+        >
+          <SlidersHorizontal className="h-4 w-4" />
+          الفلاتر
+          {activeFilterCount > 0 && (
+            <span className="inline-flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-primary-foreground/20 text-[10px] font-bold px-1">
+              {activeFilterCount}
             </span>
-
-            <Popover open={bulkMenuOpen} onOpenChange={setBulkMenuOpen}>
-              <PopoverTrigger className="inline-flex items-center justify-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground shadow-sm hover:bg-primary/90 transition-colors">
-                <ListChecks className="h-4 w-4" />
-                إجراءات جماعية
-              </PopoverTrigger>
-              <PopoverContent align="end" className="w-52 p-1.5 space-y-0.5">
-
-                {/* Export — all users */}
-                <button
-                  type="button"
-                  onClick={() => { setBulkMenuOpen(false); handleExportSelected(); }}
-                  disabled={exportLoading}
-                  className="w-full flex items-center gap-2.5 px-3 py-2 text-sm rounded-lg hover:bg-muted transition-colors text-right disabled:opacity-50"
-                >
-                  {exportLoading
-                    ? <Loader2 className="h-4 w-4 shrink-0 animate-spin opacity-70" />
-                    : <Download className="h-4 w-4 shrink-0 opacity-70" />
-                  }
-                  تصدير المحدد إلى Excel
-                </button>
-
-                {/* Change Status — admin, GM, shipping */}
-                {(role === "ADMIN" || role === "GENERAL_MANAGER" || role === "SHIPPING") && (
-                  <button
-                    type="button"
-                    onClick={() => { setBulkMenuOpen(false); setBulkStatusOpen(true); }}
-                    className="w-full flex items-center gap-2.5 px-3 py-2 text-sm rounded-lg hover:bg-muted transition-colors text-right"
-                  >
-                    <RefreshCw className="h-4 w-4 shrink-0 opacity-70" />
-                    تغيير حالة الشحن
-                  </button>
-                )}
-
-                {/* Divider + Delete — admin, GM */}
-                {(role === "ADMIN" || role === "GENERAL_MANAGER") && (
-                  <>
-                    <div className="h-px bg-border my-1" />
-                    <button
-                      type="button"
-                      onClick={() => { setBulkMenuOpen(false); setBulkDeleteConfirm(true); }}
-                      disabled={bulkDeleteLoading}
-                      className="w-full flex items-center gap-2.5 px-3 py-2 text-sm rounded-lg hover:bg-red-50 text-red-600 transition-colors text-right disabled:opacity-50"
-                    >
-                      {bulkDeleteLoading
-                        ? <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
-                        : <Trash2 className="h-4 w-4 shrink-0" />
-                      }
-                      حذف المحدد
-                    </button>
-                  </>
-                )}
-
-              </PopoverContent>
-            </Popover>
-
-            <Button variant="ghost" size="sm" onClick={clearSelection}>
-              <X className="h-4 w-4 ml-1" />
-              إلغاء التحديد
-            </Button>
-          </div>
-        )}
+          )}
+        </Button>
       </div>
 
-      {/* Table */}
+      {/* ── Active Filter Chips ── */}
+      {hasActiveFilters && (
+        <div className="flex flex-wrap items-center gap-1.5">
+          {statusIds.map((id) => {
+            const s = statuses.find((x) => x.id === id);
+            return (
+              <FilterChip
+                key={id}
+                label={s?.name ?? id}
+                color={s?.color}
+                onRemove={() => removeFilter("status", id)}
+              />
+            );
+          })}
+          {countryIds.map((id) => {
+            const c = filterableCountries.find((x) => x.id === id);
+            return (
+              <FilterChip
+                key={id}
+                label={c?.name ?? id}
+                onRemove={() => removeFilter("country", id)}
+              />
+            );
+          })}
+          {employeeIds.map((id) => {
+            const e = filterableUsers.find((x) => x.id === id);
+            return (
+              <FilterChip
+                key={id}
+                label={e?.name ?? id}
+                onRemove={() => removeFilter("employee", id)}
+              />
+            );
+          })}
+          {(dateFrom || dateTo) && (
+            <FilterChip
+              label={
+                dateFrom && dateTo
+                  ? `${dateFrom} ← ${dateTo}`
+                  : dateFrom
+                    ? `من ${dateFrom}`
+                    : `حتى ${dateTo}`
+              }
+              onRemove={removeDateFilter}
+            />
+          )}
+          <button
+            type="button"
+            onClick={clearFilters}
+            className="text-xs text-muted-foreground hover:text-destructive transition-colors font-medium"
+          >
+            مسح الكل
+          </button>
+        </div>
+      )}
+
+      {/* ── Bulk Actions Bar (shown when selection is active) ── */}
+      {hasSelection && (
+        <div className="flex items-center justify-between px-4 py-2.5 rounded-xl bg-primary/5 border border-primary/15">
+          <div className="flex items-center gap-3">
+            <span className="text-sm font-medium text-foreground">
+              تم تحديد{" "}
+              <strong className="text-primary">{selectedCount.toLocaleString("ar")}</strong>{" "}
+              طلب
+              {selectAllFiltered && (
+                <span className="text-xs font-normal text-muted-foreground mr-1">(كل النتائج)</span>
+              )}
+              {selectLimitedCount !== null && (
+                <span className="text-xs font-normal text-muted-foreground mr-1">(الأوائل)</span>
+              )}
+            </span>
+            <Button variant="ghost" size="sm" className="h-7 text-muted-foreground hover:text-foreground" onClick={clearSelection}>
+              <X className="h-3.5 w-3.5 ml-1" />
+              إلغاء
+            </Button>
+          </div>
+
+          <Popover open={bulkMenuOpen} onOpenChange={setBulkMenuOpen}>
+            <PopoverTrigger className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground shadow-sm hover:bg-primary/90 transition-colors h-8">
+              <ListChecks className="h-4 w-4" />
+              إجراءات جماعية
+              <ChevronDown className="h-3.5 w-3.5" />
+            </PopoverTrigger>
+            <PopoverContent align="end" className="w-56 p-1.5 space-y-0.5">
+
+              {/* Export — all users */}
+              <button
+                type="button"
+                onClick={() => { setBulkMenuOpen(false); handleExportSelected(); }}
+                disabled={exportLoading}
+                className="w-full flex items-center gap-2.5 px-3 py-2 text-sm rounded-lg hover:bg-muted transition-colors text-right disabled:opacity-50"
+              >
+                {exportLoading
+                  ? <Loader2 className="h-4 w-4 shrink-0 animate-spin opacity-70" />
+                  : <Download className="h-4 w-4 shrink-0 opacity-70" />}
+                تصدير المحدد إلى Excel
+              </button>
+
+              {/* Change Status — admin, GM, shipping */}
+              {(role === "ADMIN" || role === "GENERAL_MANAGER" || role === "SHIPPING") && (
+                <button
+                  type="button"
+                  onClick={() => { setBulkMenuOpen(false); setBulkStatusOpen(true); }}
+                  className="w-full flex items-center gap-2.5 px-3 py-2 text-sm rounded-lg hover:bg-muted transition-colors text-right"
+                >
+                  <RefreshCw className="h-4 w-4 shrink-0 opacity-70" />
+                  تغيير حالة الشحن
+                </button>
+              )}
+
+              {/* Delete — admin, GM */}
+              {(role === "ADMIN" || role === "GENERAL_MANAGER") && (
+                <>
+                  <div className="h-px bg-border my-1" />
+                  <button
+                    type="button"
+                    onClick={() => { setBulkMenuOpen(false); setBulkDeleteConfirm(true); }}
+                    disabled={bulkDeleteLoading}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 text-sm rounded-lg hover:bg-red-50 text-red-600 transition-colors text-right disabled:opacity-50"
+                  >
+                    {bulkDeleteLoading
+                      ? <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+                      : <Trash2 className="h-4 w-4 shrink-0" />}
+                    حذف المحدد
+                  </button>
+                </>
+              )}
+
+            </PopoverContent>
+          </Popover>
+        </div>
+      )}
+
+      {/* ── Select All / First N Banner (shown after page selection, more results exist) ── */}
+      {selected.size > 0 && !selectAllFiltered && selectLimitedCount === null &&
+        data && data.total > allIds.length && (
+        <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2 rounded-lg bg-muted/40 border border-border text-sm">
+          <span className="text-muted-foreground">
+            تم تحديد <strong>{selected.size}</strong> طلب من الصفحة الحالية فقط
+          </span>
+          <div className="flex items-center gap-3 flex-wrap">
+            {data.total > 50 && (
+              <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                تحديد أول:
+                {[50, 100, 200].filter((n) => n < data.total).map((n) => (
+                  <button
+                    key={n}
+                    type="button"
+                    onClick={() => selectFirst(n)}
+                    className="text-primary hover:underline font-medium"
+                  >
+                    {n}
+                  </button>
+                ))}
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={() => { setSelectAllFiltered(true); setSelected(new Set()); setSelectLimitedCount(null); }}
+              className="text-primary hover:underline text-xs font-semibold"
+            >
+              تحديد جميع {data.total.toLocaleString("ar")} طلب
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Table ── */}
       <div className="rounded-lg border overflow-hidden">
         <Table>
           <TableHeader>
             <TableRow>
               <TableHead className="w-10">
-                <Checkbox checked={allSelected} onCheckedChange={toggleAll} />
+                <Checkbox
+                  checked={selectAllFiltered || selectLimitedCount !== null || allPageSelected}
+                  onCheckedChange={toggleAll}
+                />
               </TableHead>
               <TableHead>رقم الطلب</TableHead>
               <TableHead>العميل</TableHead>
@@ -1323,7 +1662,10 @@ function OrdersPageInner({ setImportOpen }: { setImportOpen: (open: boolean) => 
               data?.data.map((order) => (
                 <TableRow
                   key={order.id}
-                  className="cursor-pointer hover:bg-muted/50"
+                  className={cn(
+                    "cursor-pointer hover:bg-muted/50 transition-colors",
+                    selected.has(order.id) && "bg-primary/5 hover:bg-primary/8"
+                  )}
                   onClick={() => router.push(`/orders/${order.id}`)}
                 >
                   <TableCell onClick={(e) => e.stopPropagation()}>
@@ -1355,7 +1697,15 @@ function OrdersPageInner({ setImportOpen }: { setImportOpen: (open: boolean) => 
                     <span className="text-xs text-muted-foreground mr-1">{order.currency.code}</span>
                   </TableCell>
                   <TableCell>
-                    <Badge variant="outline" className="text-xs border" style={{ backgroundColor: order.status.color + "22", color: order.status.color, borderColor: order.status.color + "55" }}>
+                    <Badge
+                      variant="outline"
+                      className="text-xs border"
+                      style={{
+                        backgroundColor: order.status.color + "22",
+                        color: order.status.color,
+                        borderColor: order.status.color + "55",
+                      }}
+                    >
                       {order.status.name}
                     </Badge>
                   </TableCell>
@@ -1370,7 +1720,7 @@ function OrdersPageInner({ setImportOpen }: { setImportOpen: (open: boolean) => 
         </Table>
       </div>
 
-      {/* Pagination */}
+      {/* ── Pagination ── */}
       {data && data.total > 0 && (
         <div className="flex items-center justify-between text-sm text-muted-foreground">
           <span>
@@ -1385,20 +1735,38 @@ function OrdersPageInner({ setImportOpen }: { setImportOpen: (open: boolean) => 
         </div>
       )}
 
-      {/* Bulk Status Dialog */}
+      {/* ── Filters Modal ── */}
+      <FiltersModal
+        open={filterModalOpen}
+        onClose={() => setFilterModalOpen(false)}
+        statuses={statuses}
+        countries={filterableCountries}
+        employees={filterableUsers}
+        canFilterByEmployee={canFilterByEmployee && !usersLoading}
+        canFilterByCountry={canFilterByCountry}
+        currentStatuses={statusIds}
+        currentCountries={countryIds}
+        currentEmployees={employeeIds}
+        currentDateFrom={dateFrom}
+        currentDateTo={dateTo}
+        onApply={applyFilters}
+        onClear={clearFilters}
+      />
+
+      {/* ── Bulk Status Dialog ── */}
       <BulkStatusDialog
         open={bulkStatusOpen}
         onClose={() => setBulkStatusOpen(false)}
-        count={selected.size}
+        count={selectedCount}
         onConfirm={handleBulkStatusConfirm}
       />
 
-      {/* Bulk Delete Confirm */}
+      {/* ── Bulk Delete Confirm ── */}
       <ConfirmDialog
         open={bulkDeleteConfirm}
         onOpenChange={setBulkDeleteConfirm}
         title="حذف الطلبات المحددة"
-        description={`هل أنت متأكد من حذف ${selected.size} طلب؟ لا يمكن التراجع عن هذا الإجراء.`}
+        description={`هل أنت متأكد من حذف ${selectedCount.toLocaleString("ar")} طلب؟ لا يمكن التراجع عن هذا الإجراء.`}
         confirmLabel="حذف"
         cancelLabel="إلغاء"
         onConfirm={handleBulkDelete}
@@ -1406,7 +1774,7 @@ function OrdersPageInner({ setImportOpen }: { setImportOpen: (open: boolean) => 
         variant="destructive"
       />
 
-      {/* Large Export Confirm */}
+      {/* ── Large Export Confirm ── */}
       <ConfirmDialog
         open={exportFilterConfirmOpen}
         onOpenChange={setExportFilterConfirmOpen}

@@ -65,11 +65,16 @@ export async function GET(request: NextRequest) {
   const page = Math.max(1, parseInt(searchParams.get("page") ?? "1"));
   const pageSize = Math.min(100, parseInt(searchParams.get("pageSize") ?? "25"));
   const search = searchParams.get("search") ?? "";
-  const statusIds = searchParams.getAll("status");   // status param now holds IDs
-  const countryIds = searchParams.getAll("countryId");
+  const statusIds = searchParams.getAll("status");
+  // Support both old (countryId) and new (country) param names
+  const countryIds = [...searchParams.getAll("country"), ...searchParams.getAll("countryId")];
   const currencyId = searchParams.get("currencyId");
   const paymentMethodId = searchParams.get("paymentMethodId");
-  const createdById = searchParams.get("createdById");
+  // Support both old (createdById) and new (employee) param names
+  const employeeIds = [
+    ...searchParams.getAll("employee"),
+    ...(searchParams.get("createdById") ? [searchParams.get("createdById")!] : []),
+  ];
   const dateFrom = searchParams.get("dateFrom");
   const dateTo = searchParams.get("dateTo");
 
@@ -86,8 +91,9 @@ export async function GET(request: NextRequest) {
   if (countryIds.length > 0) userFilter.countryId = { in: countryIds };
   if (currencyId) userFilter.currencyId = currencyId;
   if (paymentMethodId) userFilter.paymentMethodId = paymentMethodId;
-  if (createdById && (role === "ADMIN" || role === "GENERAL_MANAGER" || role === "SALES_MANAGER")) {
-    userFilter.createdById = createdById;
+  const canFilterByEmployee = role === "ADMIN" || role === "GENERAL_MANAGER" || role === "SALES_MANAGER";
+  if (employeeIds.length > 0 && canFilterByEmployee) {
+    userFilter.createdById = { in: employeeIds };
   }
   const filterTeamId = searchParams.get("teamId");
   if ((role === "ADMIN" || role === "GENERAL_MANAGER") && filterTeamId) {
@@ -294,9 +300,10 @@ export async function POST(request: NextRequest) {
 type BulkFilters = {
   search?: string;
   status?: string[];
+  country?: string[];
+  employee?: string[];
   dateFrom?: string;
   dateTo?: string;
-  createdById?: string;
   teamId?: string;
 };
 
@@ -312,8 +319,10 @@ function buildBulkWhere(
 
   const userFilter: Record<string, unknown> = {};
   if (filters.status && filters.status.length > 0) userFilter.statusId = { in: filters.status };
-  if (filters.createdById && (userRole === "ADMIN" || userRole === "GENERAL_MANAGER" || userRole === "SALES_MANAGER")) {
-    userFilter.createdById = filters.createdById;
+  if (filters.country && filters.country.length > 0) userFilter.countryId = { in: filters.country };
+  const canFilterByEmployee = userRole === "ADMIN" || userRole === "GENERAL_MANAGER" || userRole === "SALES_MANAGER";
+  if (filters.employee && filters.employee.length > 0 && canFilterByEmployee) {
+    userFilter.createdById = { in: filters.employee };
   }
   if (filters.teamId && (userRole === "ADMIN" || userRole === "GENERAL_MANAGER")) {
     roleFilter.teamId = filters.teamId;

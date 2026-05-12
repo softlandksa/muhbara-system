@@ -80,7 +80,9 @@
       "PowerShell(New-Item *)",
       "Bash(Get-ChildItem -Path \"D:\\\\Systems\\\\Muhbara\\\\Sales sys\\\\order-management\" -Recurse -Directory)",
       "Bash(Select-Object -First 30)",
-      "Bash(Format-Table FullName)"
+      "Bash(Format-Table FullName)",
+      "Bash(Get-ChildItem -Path \"D:\\\\Systems\\\\Muhbara\\\\Sales sys\\\\order-management\" -Force)",
+      "Bash(Select-Object Name, FullName)"
     ]
   }
 }

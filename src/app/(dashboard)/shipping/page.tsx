@@ -1,13 +1,13 @@
 "use client";
 
-import { useState, useMemo, useEffect, useRef } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { format, subDays } from "date-fns";
 import { arSA } from "date-fns/locale";
 import { formatOrderDate } from "@/lib/date-format";
-import { Loader2, Truck, ExternalLink, RefreshCw, CheckSquare, X, CalendarIcon, ChevronDown, Search, Globe, Pencil, Save, Users } from "lucide-react";
+import { Loader2, Truck, ExternalLink, RefreshCw, CheckSquare, X, CalendarIcon, Globe, Pencil, Save, Users } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -20,6 +20,7 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 import { ShippingStatusDialog } from "@/components/shared/ShippingStatusDialog";
+import { MultiSelectPopover } from "@/components/shared/MultiSelectPopover";
 import { GoogleSheetSyncButton } from "@/components/shared/GoogleSheetSyncButton";
 import { SearchInput } from "@/components/ui/search-input";
 import { normalizePhone, parseMultiPhone } from "@/lib/phone";
@@ -69,113 +70,6 @@ type TabDef = {
 };
 
 
-// ─── Country multi-select ─────────────────────────────────────────────────────
-
-function CountryMultiSelect({
-  countries,
-  selectedIds,
-  onToggle,
-  onClear,
-}: {
-  countries: Country[];
-  selectedIds: Set<string>;
-  onToggle: (id: string) => void;
-  onClear: () => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const [search, setSearch] = useState("");
-  const searchRef = useRef<HTMLInputElement>(null);
-
-  const filtered = useMemo(
-    () =>
-      search
-        ? countries.filter((c) => c.name.includes(search))
-        : countries,
-    [countries, search],
-  );
-
-  const label =
-    selectedIds.size === 0
-      ? "كل الدول"
-      : `${selectedIds.size} ${selectedIds.size === 1 ? "دولة" : "دول"}`;
-
-  return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger
-        className={cn(
-          "inline-flex h-8 items-center gap-1.5 rounded-md border px-3 text-sm transition-colors min-w-[150px]",
-          selectedIds.size > 0
-            ? "border-primary bg-primary/10 text-primary"
-            : "border-input text-foreground hover:bg-muted",
-        )}
-      >
-        <Globe className="h-3.5 w-3.5 shrink-0" />
-        <span className="flex-1 text-right">{label}</span>
-        <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-60" />
-      </PopoverTrigger>
-      <PopoverContent className="w-64 p-0" align="start">
-        {/* Search */}
-        <div className="flex items-center gap-2 px-3 py-2 border-b">
-          <Search className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-          <input
-            ref={searchRef}
-            type="text"
-            placeholder="بحث..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground ps-0 pe-1"
-          />
-          {search && (
-            <button
-              type="button"
-              onClick={() => {
-                setSearch("");
-                searchRef.current?.focus();
-              }}
-              className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
-              aria-label="مسح البحث"
-            >
-              <X className="h-3.5 w-3.5" />
-            </button>
-          )}
-        </div>
-        {/* Country list */}
-        <div className="max-h-48 overflow-y-auto">
-          {filtered.map((c) => (
-            <button
-              key={c.id}
-              type="button"
-              onClick={() => onToggle(c.id)}
-              className="w-full flex items-center gap-2 px-3 py-1.5 text-sm cursor-pointer hover:bg-accent/80 hover:shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
-            >
-              <Checkbox
-                checked={selectedIds.has(c.id)}
-                onCheckedChange={() => onToggle(c.id)}
-                onClick={(e) => e.stopPropagation()}
-                className="shrink-0"
-              />
-              {c.name}
-            </button>
-          ))}
-          {filtered.length === 0 && (
-            <p className="px-3 py-4 text-center text-sm text-muted-foreground">لا توجد نتائج</p>
-          )}
-        </div>
-        {selectedIds.size > 0 && (
-          <div className="border-t p-2">
-            <button
-              type="button"
-              onClick={() => { onClear(); setOpen(false); }}
-              className="w-full text-xs text-muted-foreground hover:text-destructive transition-colors py-1"
-            >
-              مسح التحديد
-            </button>
-          </div>
-        )}
-      </PopoverContent>
-    </Popover>
-  );
-}
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
@@ -604,11 +498,15 @@ export default function ShippingPage() {
         {/* Country multi-select */}
         <div className="flex items-center gap-2">
           <label className="text-sm font-medium whitespace-nowrap">الدولة:</label>
-          <CountryMultiSelect
-            countries={countries}
+          <MultiSelectPopover
+            items={countries}
             selectedIds={selectedCountryIds}
             onToggle={handleCountryToggle}
             onClear={handleCountryClear}
+            emptyLabel="كل الدول"
+            activeLabel={(n) => `${n} ${n === 1 ? "دولة" : "دول"}`}
+            icon={<Globe className="h-3.5 w-3.5 shrink-0" />}
+            searchPlaceholder="بحث..."
           />
         </div>
 

@@ -4,11 +4,11 @@ import React, { useState, useEffect, useCallback, useRef, Suspense, useMemo } fr
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { format } from "date-fns";
+import { format, subDays } from "date-fns";
 import { formatOrderDate } from "@/lib/date-format";
 import {
   Plus, Download, Upload, Loader2,
-  SlidersHorizontal, X, CalendarIcon, FileDown, AlertCircle, CheckCircle2, Trash2,
+  Globe, Users, X, CalendarIcon, FileDown, AlertCircle, CheckCircle2, Trash2,
   RefreshCw, ListChecks, ChevronDown,
 } from "lucide-react";
 import { PaginationArrows } from "@/components/shared/PaginationArrows";
@@ -37,6 +37,7 @@ import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { SearchableSelect } from "@/components/shared/SearchableSelect";
 import { AppLoadingOverlay } from "@/components/shared/AppLoadingOverlay";
 import { GoogleSheetSyncButton } from "@/components/shared/GoogleSheetSyncButton";
+import { MultiSelectPopover } from "@/components/shared/MultiSelectPopover";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -78,13 +79,6 @@ type ImportResult = {
   errors: { row: number; error: string }[];
 };
 
-type FiltersApplyPayload = {
-  statuses: string[];
-  countries: string[];
-  employees: string[];
-  dateFrom: string;
-  dateTo: string;
-};
 
 // ─── Import Dialog Error Boundary ─────────────────────────────────────────────
 
@@ -662,378 +656,6 @@ function BulkStatusDialog({
   );
 }
 
-// ─── Filter Chip ──────────────────────────────────────────────────────────────
-
-function FilterChip({
-  label,
-  color,
-  onRemove,
-}: {
-  label: string;
-  color?: string;
-  onRemove: () => void;
-}) {
-  return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1.5 pl-2 pr-1.5 py-1 rounded-full border text-xs font-medium",
-        !color && "bg-primary/10 text-primary border-primary/25"
-      )}
-      style={
-        color
-          ? { backgroundColor: color + "18", color, borderColor: color + "55" }
-          : undefined
-      }
-    >
-      {color && (
-        <span className="h-2 w-2 rounded-full shrink-0" style={{ backgroundColor: color }} />
-      )}
-      {label}
-      <button
-        type="button"
-        onClick={onRemove}
-        className="hover:opacity-70 transition-opacity shrink-0"
-        aria-label="إزالة الفلتر"
-      >
-        <X className="h-3 w-3" />
-      </button>
-    </span>
-  );
-}
-
-// ─── Multi-Check Section (inside FiltersModal) ─────────────────────────────────
-
-function MultiCheckSection({
-  title,
-  items,
-  selected,
-  onToggle,
-  onToggleAll,
-  searchPlaceholder,
-  selectedLabel,
-}: {
-  title: string;
-  items: { value: string; label: string; color?: string }[];
-  selected: string[];
-  onToggle: (value: string) => void;
-  onToggleAll: (wasAllSelected: boolean) => void;
-  searchPlaceholder: string;
-  selectedLabel?: (count: number) => string;
-}) {
-  const [search, setSearch] = useState("");
-
-  const filtered = useMemo(
-    () =>
-      search.trim()
-        ? items.filter((i) =>
-            i.label.toLowerCase().includes(search.toLowerCase())
-          )
-        : items,
-    [items, search]
-  );
-
-  const allSelected = items.length > 0 && items.every((i) => selected.includes(i.value));
-
-  return (
-    <div className="space-y-2">
-      <div className="flex items-center justify-between">
-        <span className="text-sm font-semibold text-foreground">{title}</span>
-        {selected.length > 0 && (
-          <span className="text-[11px] bg-primary/10 text-primary px-2 py-0.5 rounded-full font-medium">
-            {selectedLabel ? selectedLabel(selected.length) : `${selected.length} محدد`}
-          </span>
-        )}
-      </div>
-      <div className="border rounded-xl overflow-hidden shadow-sm">
-        <div className="p-2 border-b bg-muted/30">
-          <input
-            type="text"
-            placeholder={searchPlaceholder}
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-full px-3 py-1.5 text-sm bg-background border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/30 transition-all placeholder:text-muted-foreground/60"
-            dir="rtl"
-          />
-        </div>
-        <div className="max-h-44 overflow-y-auto p-1.5 space-y-0.5">
-          {items.length > 0 && (
-            <label className="flex items-center gap-2.5 px-2 py-1.5 rounded-lg hover:bg-muted cursor-pointer select-none group">
-              <Checkbox
-                checked={allSelected}
-                onCheckedChange={() => onToggleAll(allSelected)}
-                className="shrink-0"
-              />
-              <span className="text-sm font-medium text-muted-foreground group-hover:text-foreground">
-                تحديد الكل
-              </span>
-            </label>
-          )}
-          {filtered.length === 0 && (
-            <p className="text-center py-3 text-sm text-muted-foreground">لا توجد نتائج</p>
-          )}
-          {filtered.map((item) => (
-            <label
-              key={item.value}
-              className="flex items-center gap-2.5 px-2 py-1.5 rounded-lg hover:bg-muted cursor-pointer select-none group"
-            >
-              <Checkbox
-                checked={selected.includes(item.value)}
-                onCheckedChange={() => onToggle(item.value)}
-                className="shrink-0"
-              />
-              <span className="flex items-center gap-2 text-sm flex-1 min-w-0">
-                {item.color && (
-                  <span
-                    className="h-2.5 w-2.5 rounded-full shrink-0"
-                    style={{ backgroundColor: item.color }}
-                  />
-                )}
-                <span className="truncate">{item.label}</span>
-              </span>
-            </label>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ─── Filters Modal ─────────────────────────────────────────────────────────────
-
-function FiltersModal({
-  open,
-  onClose,
-  statuses,
-  countries,
-  employees,
-  canFilterByEmployee,
-  canFilterByCountry,
-  currentStatuses,
-  currentCountries,
-  currentEmployees,
-  currentDateFrom,
-  currentDateTo,
-  onApply,
-  onClear,
-}: {
-  open: boolean;
-  onClose: () => void;
-  statuses: StatusItem[];
-  countries: { id: string; name: string }[];
-  employees: { id: string; name: string }[];
-  canFilterByEmployee: boolean;
-  canFilterByCountry: boolean;
-  currentStatuses: string[];
-  currentCountries: string[];
-  currentEmployees: string[];
-  currentDateFrom: string;
-  currentDateTo: string;
-  onApply: (payload: FiltersApplyPayload) => void;
-  onClear: () => void;
-}) {
-  const [tempStatuses, setTempStatuses] = useState(currentStatuses);
-  const [tempCountries, setTempCountries] = useState(currentCountries);
-  const [tempEmployees, setTempEmployees] = useState(currentEmployees);
-  const [tempDateFrom, setTempDateFrom] = useState(currentDateFrom);
-  const [tempDateTo, setTempDateTo] = useState(currentDateTo);
-  const [dateFromOpen, setDateFromOpen] = useState(false);
-  const [dateToOpen, setDateToOpen] = useState(false);
-
-  useEffect(() => {
-    if (open) {
-      setTempStatuses(currentStatuses);
-      setTempCountries(currentCountries);
-      setTempEmployees(currentEmployees);
-      setTempDateFrom(currentDateFrom);
-      setTempDateTo(currentDateTo);
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
-
-  const toggleStatus = (id: string) =>
-    setTempStatuses((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
-  const toggleCountry = (id: string) =>
-    setTempCountries((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
-  const toggleEmployee = (id: string) =>
-    setTempEmployees((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
-
-  const totalSelected =
-    tempStatuses.length +
-    tempCountries.length +
-    tempEmployees.length +
-    (tempDateFrom ? 1 : 0) +
-    (tempDateTo ? 1 : 0);
-
-  const handleApply = () => {
-    onApply({
-      statuses: tempStatuses,
-      countries: tempCountries,
-      employees: tempEmployees,
-      dateFrom: tempDateFrom,
-      dateTo: tempDateTo,
-    });
-  };
-
-  const handleClear = () => {
-    setTempStatuses([]);
-    setTempCountries([]);
-    setTempEmployees([]);
-    setTempDateFrom("");
-    setTempDateTo("");
-    onClear();
-  };
-
-  return (
-    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent dir="rtl" className="max-w-lg flex flex-col max-h-[90dvh]">
-        <DialogHeader className="shrink-0">
-          <DialogTitle className="flex items-center gap-2">
-            <SlidersHorizontal className="h-4 w-4" />
-            الفلاتر
-            {totalSelected > 0 && (
-              <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-primary text-primary-foreground text-[10px] font-bold px-1.5">
-                {totalSelected}
-              </span>
-            )}
-          </DialogTitle>
-        </DialogHeader>
-
-        <div className="flex-1 min-h-0 overflow-y-auto space-y-5 py-2 px-1">
-          {/* Shipping Status */}
-          <MultiCheckSection
-            title="حالة الشحن"
-            items={statuses.map((s) => ({ value: s.id, label: s.name, color: s.color }))}
-            selected={tempStatuses}
-            onToggle={toggleStatus}
-            onToggleAll={(allSelected) =>
-              setTempStatuses(allSelected ? [] : statuses.map((s) => s.id))
-            }
-            searchPlaceholder="ابحث عن حالة..."
-            selectedLabel={(n) => `${n} حالة محددة`}
-          />
-
-          {/* Country */}
-          {canFilterByCountry && (
-            <MultiCheckSection
-              title="الدولة"
-              items={countries.map((c) => ({ value: c.id, label: c.name }))}
-              selected={tempCountries}
-              onToggle={toggleCountry}
-              onToggleAll={(allSelected) =>
-                setTempCountries(allSelected ? [] : countries.map((c) => c.id))
-              }
-              searchPlaceholder="ابحث عن دولة..."
-              selectedLabel={(n) => `${n === 1 ? "دولة واحدة" : n + " دول"} محددة`}
-            />
-          )}
-
-          {/* Employee */}
-          {canFilterByEmployee && (
-            <MultiCheckSection
-              title="الموظف"
-              items={employees.map((e) => ({ value: e.id, label: e.name }))}
-              selected={tempEmployees}
-              onToggle={toggleEmployee}
-              onToggleAll={(allSelected) =>
-                setTempEmployees(allSelected ? [] : employees.map((e) => e.id))
-              }
-              searchPlaceholder="ابحث عن موظف..."
-              selectedLabel={(n) => `${n} موظف محدد`}
-            />
-          )}
-
-          {/* Date Range */}
-          <div className="space-y-2">
-            <span className="text-sm font-semibold text-foreground">نطاق التاريخ</span>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label className="text-xs text-muted-foreground">من تاريخ</Label>
-                <Popover open={dateFromOpen} onOpenChange={setDateFromOpen}>
-                  <PopoverTrigger
-                    className={cn(
-                      "flex h-9 w-full items-center justify-between rounded-lg border border-input bg-transparent px-3 py-2 text-sm transition-colors hover:bg-muted/30",
-                      tempDateFrom ? "text-foreground" : "text-muted-foreground"
-                    )}
-                  >
-                    <span>{tempDateFrom || "اختر تاريخاً"}</span>
-                    <CalendarIcon className="h-4 w-4 opacity-40" />
-                  </PopoverTrigger>
-                  <PopoverContent className="w-auto p-0" align="start">
-                    <Calendar
-                      mode="single"
-                      selected={tempDateFrom ? new Date(tempDateFrom) : undefined}
-                      onDayClick={(d) => {
-                        setTempDateFrom(format(d, "yyyy-MM-dd"));
-                        setDateFromOpen(false);
-                      }}
-                    />
-                    {tempDateFrom && (
-                      <div className="p-2 border-t">
-                        <button
-                          type="button"
-                          className="w-full text-xs text-muted-foreground hover:text-foreground text-center"
-                          onClick={() => { setTempDateFrom(""); setDateFromOpen(false); }}
-                        >
-                          مسح التاريخ
-                        </button>
-                      </div>
-                    )}
-                  </PopoverContent>
-                </Popover>
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs text-muted-foreground">إلى تاريخ</Label>
-                <Popover open={dateToOpen} onOpenChange={setDateToOpen}>
-                  <PopoverTrigger
-                    className={cn(
-                      "flex h-9 w-full items-center justify-between rounded-lg border border-input bg-transparent px-3 py-2 text-sm transition-colors hover:bg-muted/30",
-                      tempDateTo ? "text-foreground" : "text-muted-foreground"
-                    )}
-                  >
-                    <span>{tempDateTo || "اختر تاريخاً"}</span>
-                    <CalendarIcon className="h-4 w-4 opacity-40" />
-                  </PopoverTrigger>
-                  <PopoverContent className="w-auto p-0" align="start">
-                    <Calendar
-                      mode="single"
-                      selected={tempDateTo ? new Date(tempDateTo) : undefined}
-                      onDayClick={(d) => {
-                        setTempDateTo(format(d, "yyyy-MM-dd"));
-                        setDateToOpen(false);
-                      }}
-                    />
-                    {tempDateTo && (
-                      <div className="p-2 border-t">
-                        <button
-                          type="button"
-                          className="w-full text-xs text-muted-foreground hover:text-foreground text-center"
-                          onClick={() => { setTempDateTo(""); setDateToOpen(false); }}
-                        >
-                          مسح التاريخ
-                        </button>
-                      </div>
-                    )}
-                  </PopoverContent>
-                </Popover>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <DialogFooter className="gap-2 shrink-0 border-t pt-4 flex-row">
-          <Button variant="outline" className="flex-1" onClick={handleClear}>
-            <X className="h-4 w-4 ml-1.5" />
-            إلغاء الفلاتر
-          </Button>
-          <Button className="flex-1" onClick={handleApply}>
-            <SlidersHorizontal className="h-4 w-4 ml-1.5" />
-            تطبيق الفلاتر
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
 
 // ─── Inner component (uses useSearchParams) ───────────────────────────────────
 
@@ -1047,7 +669,7 @@ function OrdersPageInner({ setImportOpen }: { setImportOpen: (open: boolean) => 
   const role = session?.user?.role;
 
   // ── Statuses lookup ──
-  const { data: statusesData, isLoading: statusesLoading, isError: statusesError } = useQuery<{ data: StatusItem[] }>({
+  const { data: statusesData, isError: statusesError } = useQuery<{ data: StatusItem[] }>({
     queryKey: ["shipping-statuses"],
     queryFn: () => fetch("/api/lookup/shipping-statuses").then((r) => r.json()),
     staleTime: 5 * 60 * 1000,
@@ -1102,12 +724,26 @@ function OrdersPageInner({ setImportOpen }: { setImportOpen: (open: boolean) => 
 
   const hasActiveFilters =
     statusIds.length > 0 || countryIds.length > 0 || employeeIds.length > 0 || !!dateFrom || !!dateTo;
-  const activeFilterCount =
-    statusIds.length + countryIds.length + employeeIds.length + (dateFrom ? 1 : 0) + (dateTo ? 1 : 0);
+  const hasDateFilter = !!(dateFrom || dateTo);
+
+  // ── Date preset helpers ──
+  const todayStr     = format(new Date(), "yyyy-MM-dd");
+  const yesterdayStr = format(subDays(new Date(), 1), "yyyy-MM-dd");
+  const isToday     = dateFrom === todayStr     && dateTo === todayStr;
+  const isYesterday = dateFrom === yesterdayStr && dateTo === yesterdayStr;
+
+  const activeDateLabel = useMemo(() => {
+    if (!dateFrom && !dateTo) return null;
+    if (dateFrom && dateTo && dateFrom === dateTo) return formatOrderDate(dateFrom);
+    const from = dateFrom ? formatOrderDate(dateFrom) : "...";
+    const to   = dateTo   ? formatOrderDate(dateTo)   : "...";
+    return `${from} — ${to}`;
+  }, [dateFrom, dateTo]);
 
   // ── Local state ──
   const [searchInput, setSearchInput] = useState(searchQ);
-  const [filterModalOpen, setFilterModalOpen] = useState(false);
+  const [dateFromPickerOpen, setDateFromPickerOpen] = useState(false);
+  const [dateToPickerOpen, setDateToPickerOpen] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [selectAllFiltered, setSelectAllFiltered] = useState(false);
   const [selectLimitedCount, setSelectLimitedCount] = useState<number | null>(null);
@@ -1332,27 +968,6 @@ function OrdersPageInner({ setImportOpen }: { setImportOpen: (open: boolean) => 
   };
 
   // ── Filter actions ──
-  const applyFilters = useCallback(
-    ({ statuses: s, countries: c, employees: e, dateFrom: df, dateTo: dt }: FiltersApplyPayload) => {
-      const params = new URLSearchParams(searchParams.toString());
-      params.delete("status");
-      params.delete("country");
-      params.delete("employee");
-      params.delete("dateFrom");
-      params.delete("dateTo");
-      s.forEach((v) => params.append("status", v));
-      c.forEach((v) => params.append("country", v));
-      e.forEach((v) => params.append("employee", v));
-      if (df) params.set("dateFrom", df);
-      if (dt) params.set("dateTo", dt);
-      params.set("page", "1");
-      router.replace(`${pathname}?${params.toString()}`);
-      setFilterModalOpen(false);
-      clearSelection();
-    },
-    [searchParams, pathname, router, clearSelection]
-  );
-
   const clearFilters = useCallback(() => {
     const params = new URLSearchParams(searchParams.toString());
     params.delete("status");
@@ -1362,22 +977,8 @@ function OrdersPageInner({ setImportOpen }: { setImportOpen: (open: boolean) => 
     params.delete("dateTo");
     params.set("page", "1");
     router.replace(`${pathname}?${params.toString()}`);
-    setFilterModalOpen(false);
     clearSelection();
   }, [searchParams, pathname, router, clearSelection]);
-
-  const removeFilter = useCallback(
-    (type: "status" | "country" | "employee", id: string) => {
-      const params = new URLSearchParams(searchParams.toString());
-      const current = params.getAll(type).filter((v) => v !== id);
-      params.delete(type);
-      current.forEach((v) => params.append(type, v));
-      params.set("page", "1");
-      router.replace(`${pathname}?${params.toString()}`);
-      clearSelection();
-    },
-    [searchParams, pathname, router, clearSelection]
-  );
 
   const removeDateFilter = useCallback(() => {
     const params = new URLSearchParams(searchParams.toString());
@@ -1385,7 +986,53 @@ function OrdersPageInner({ setImportOpen }: { setImportOpen: (open: boolean) => 
     params.delete("dateTo");
     params.set("page", "1");
     router.replace(`${pathname}?${params.toString()}`);
-  }, [searchParams, pathname, router]);
+    clearSelection();
+  }, [searchParams, pathname, router, clearSelection]);
+
+  const toggleMultiParam = useCallback(
+    (key: string, id: string) => {
+      const params = new URLSearchParams(searchParams.toString());
+      const current = params.getAll(key);
+      const next = current.includes(id) ? current.filter((v) => v !== id) : [...current, id];
+      params.delete(key);
+      next.forEach((v) => params.append(key, v));
+      params.set("page", "1");
+      router.replace(`${pathname}?${params.toString()}`);
+      clearSelection();
+    },
+    [searchParams, pathname, router, clearSelection],
+  );
+
+  const clearMultiParam = useCallback(
+    (key: string) => {
+      const params = new URLSearchParams(searchParams.toString());
+      params.delete(key);
+      params.set("page", "1");
+      router.replace(`${pathname}?${params.toString()}`);
+      clearSelection();
+    },
+    [searchParams, pathname, router, clearSelection],
+  );
+
+  const handleDatePreset = useCallback(
+    (preset: "today" | "yesterday" | "clear") => {
+      const params = new URLSearchParams(searchParams.toString());
+      if (preset === "today") {
+        params.set("dateFrom", todayStr);
+        params.set("dateTo", todayStr);
+      } else if (preset === "yesterday") {
+        params.set("dateFrom", yesterdayStr);
+        params.set("dateTo", yesterdayStr);
+      } else {
+        params.delete("dateFrom");
+        params.delete("dateTo");
+      }
+      params.set("page", "1");
+      router.replace(`${pathname}?${params.toString()}`);
+      clearSelection();
+    },
+    [searchParams, pathname, router, clearSelection, todayStr, yesterdayStr],
+  );
 
   return (
     <div className="p-6 space-y-4" dir="rtl">
@@ -1427,8 +1074,8 @@ function OrdersPageInner({ setImportOpen }: { setImportOpen: (open: boolean) => 
         </div>
       </div>
 
-      {/* ── Search + Filters Button ── */}
-      <div className="flex items-center gap-2 flex-wrap">
+      {/* ── Search ── */}
+      <div className="flex items-center gap-2">
         <SearchInput
           className="w-[280px]"
           placeholder="بحث برقم الطلب أو اسم العميل أو الجوال..."
@@ -1437,70 +1084,203 @@ function OrdersPageInner({ setImportOpen }: { setImportOpen: (open: boolean) => 
           isSearching={isSearching}
           dir="rtl"
         />
-
-        <Button
-          variant={hasActiveFilters ? "default" : "outline"}
-          size="sm"
-          onClick={() => setFilterModalOpen(true)}
-          className="gap-1.5 h-9"
-          disabled={statusesLoading}
-        >
-          <SlidersHorizontal className="h-4 w-4" />
-          الفلاتر
-          {activeFilterCount > 0 && (
-            <span className="inline-flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-primary-foreground/20 text-[10px] font-bold px-1">
-              {activeFilterCount}
-            </span>
-          )}
-        </Button>
       </div>
 
-      {/* ── Active Filter Chips ── */}
-      {hasActiveFilters && (
-        <div className="flex flex-wrap items-center gap-1.5">
-          {statusIds.map((id) => {
-            const s = statuses.find((x) => x.id === id);
-            return (
-              <FilterChip
-                key={id}
-                label={s?.name ?? id}
-                color={s?.color}
-                onRemove={() => removeFilter("status", id)}
-              />
-            );
-          })}
-          {countryIds.map((id) => {
-            const c = filterableCountries.find((x) => x.id === id);
-            return (
-              <FilterChip
-                key={id}
-                label={c?.name ?? id}
-                onRemove={() => removeFilter("country", id)}
-              />
-            );
-          })}
-          {employeeIds.map((id) => {
-            const e = filterableUsers.find((x) => x.id === id);
-            return (
-              <FilterChip
-                key={id}
-                label={e?.name ?? id}
-                onRemove={() => removeFilter("employee", id)}
-              />
-            );
-          })}
-          {(dateFrom || dateTo) && (
-            <FilterChip
-              label={
-                dateFrom && dateTo
-                  ? `${dateFrom} ← ${dateTo}`
-                  : dateFrom
-                    ? `من ${dateFrom}`
-                    : `حتى ${dateTo}`
-              }
-              onRemove={removeDateFilter}
+      {/* ── Filter row: Status + Country + Employee + Date + Active chips ── */}
+      <div className="flex flex-wrap items-center gap-2">
+
+        {/* Status multi-select */}
+        <MultiSelectPopover
+          items={statuses.map((s) => ({ id: s.id, name: s.name, color: s.color }))}
+          selectedIds={new Set(statusIds)}
+          onToggle={(id) => toggleMultiParam("status", id)}
+          onClear={() => clearMultiParam("status")}
+          emptyLabel="كل الحالات"
+          activeLabel={(n) => `${n} حالة`}
+          searchPlaceholder="ابحث عن حالة..."
+        />
+
+        {/* Country multi-select */}
+        {canFilterByCountry && (
+          <MultiSelectPopover
+            items={filterableCountries}
+            selectedIds={new Set(countryIds)}
+            onToggle={(id) => toggleMultiParam("country", id)}
+            onClear={() => clearMultiParam("country")}
+            emptyLabel="كل الدول"
+            activeLabel={(n) => `${n} ${n === 1 ? "دولة" : "دول"}`}
+            icon={<Globe className="h-3.5 w-3.5 shrink-0" />}
+            searchPlaceholder="ابحث عن دولة..."
+          />
+        )}
+
+        {/* Employee multi-select */}
+        {canFilterByEmployee && !usersLoading && (
+          <MultiSelectPopover
+            items={filterableUsers}
+            selectedIds={new Set(employeeIds)}
+            onToggle={(id) => toggleMultiParam("employee", id)}
+            onClear={() => clearMultiParam("employee")}
+            emptyLabel="كل الموظفين"
+            activeLabel={(n) => `${n} موظف`}
+            icon={<Users className="h-3.5 w-3.5 shrink-0" />}
+            searchPlaceholder="ابحث عن موظف..."
+          />
+        )}
+
+        {/* Visual separator */}
+        <span className="hidden sm:block h-5 w-px bg-border" aria-hidden="true" />
+
+        {/* Quick date presets */}
+        <div className="flex items-center gap-1.5">
+          <span className="text-sm font-medium text-muted-foreground whitespace-nowrap">التاريخ:</span>
+          <button
+            type="button"
+            onClick={() => handleDatePreset("today")}
+            className={cn(
+              "h-8 px-3 rounded-md border text-sm font-medium transition-colors",
+              isToday
+                ? "border-primary bg-primary text-primary-foreground"
+                : "border-input hover:bg-muted"
+            )}
+          >
+            اليوم
+          </button>
+          <button
+            type="button"
+            onClick={() => handleDatePreset("yesterday")}
+            className={cn(
+              "h-8 px-3 rounded-md border text-sm font-medium transition-colors",
+              isYesterday
+                ? "border-primary bg-primary text-primary-foreground"
+                : "border-input hover:bg-muted"
+            )}
+          >
+            أمس
+          </button>
+        </div>
+
+        {/* من تاريخ */}
+        <Popover open={dateFromPickerOpen} onOpenChange={setDateFromPickerOpen}>
+          <PopoverTrigger
+            className={cn(
+              "inline-flex h-8 items-center gap-1.5 rounded-md border px-3 text-sm transition-colors",
+              dateFrom && !isToday && !isYesterday
+                ? "border-primary bg-primary/10 text-primary"
+                : "border-input text-muted-foreground hover:bg-muted"
+            )}
+          >
+            <CalendarIcon className="h-3.5 w-3.5" />
+            {dateFrom ? formatOrderDate(dateFrom) : "من تاريخ"}
+          </PopoverTrigger>
+          <PopoverContent className="w-auto p-0" align="start">
+            <Calendar
+              mode="single"
+              selected={dateFrom ? new Date(dateFrom) : undefined}
+              onDayClick={(d) => {
+                const params = new URLSearchParams(searchParams.toString());
+                params.set("dateFrom", format(d, "yyyy-MM-dd"));
+                params.set("page", "1");
+                router.replace(`${pathname}?${params.toString()}`);
+                clearSelection();
+                setDateFromPickerOpen(false);
+              }}
+              initialFocus
             />
-          )}
+          </PopoverContent>
+        </Popover>
+
+        {/* إلى تاريخ */}
+        <Popover open={dateToPickerOpen} onOpenChange={setDateToPickerOpen}>
+          <PopoverTrigger
+            className={cn(
+              "inline-flex h-8 items-center gap-1.5 rounded-md border px-3 text-sm transition-colors",
+              dateTo && !isToday && !isYesterday
+                ? "border-primary bg-primary/10 text-primary"
+                : "border-input text-muted-foreground hover:bg-muted"
+            )}
+          >
+            <CalendarIcon className="h-3.5 w-3.5" />
+            {dateTo ? formatOrderDate(dateTo) : "إلى تاريخ"}
+          </PopoverTrigger>
+          <PopoverContent className="w-auto p-0" align="start">
+            <Calendar
+              mode="single"
+              selected={dateTo ? new Date(dateTo) : undefined}
+              onDayClick={(d) => {
+                const params = new URLSearchParams(searchParams.toString());
+                params.set("dateTo", format(d, "yyyy-MM-dd"));
+                params.set("page", "1");
+                router.replace(`${pathname}?${params.toString()}`);
+                clearSelection();
+                setDateToPickerOpen(false);
+              }}
+              initialFocus
+            />
+          </PopoverContent>
+        </Popover>
+
+        {/* Active filter chips */}
+        {statusIds.map((id) => {
+          const s = statuses.find((x) => x.id === id);
+          return (
+            <button
+              key={id}
+              type="button"
+              onClick={() => toggleMultiParam("status", id)}
+              className="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium transition-colors hover:opacity-80"
+              style={
+                s?.color
+                  ? { backgroundColor: s.color + "18", color: s.color }
+                  : { backgroundColor: "hsl(var(--primary)/0.1)", color: "hsl(var(--primary))" }
+              }
+            >
+              {s?.color && <span className="h-2 w-2 rounded-full shrink-0" style={{ backgroundColor: s.color }} />}
+              {s?.name ?? id}
+              <X className="h-3 w-3" />
+            </button>
+          );
+        })}
+        {countryIds.map((id) => {
+          const c = filterableCountries.find((x) => x.id === id);
+          return (
+            <button
+              key={id}
+              type="button"
+              onClick={() => toggleMultiParam("country", id)}
+              className="inline-flex items-center gap-1 rounded-full bg-primary/10 text-primary px-2.5 py-0.5 text-xs font-medium hover:bg-primary/20 transition-colors"
+            >
+              {c?.name ?? id}
+              <X className="h-3 w-3" />
+            </button>
+          );
+        })}
+        {employeeIds.map((id) => {
+          const e = filterableUsers.find((x) => x.id === id);
+          return (
+            <button
+              key={id}
+              type="button"
+              onClick={() => toggleMultiParam("employee", id)}
+              className="inline-flex items-center gap-1 rounded-full bg-primary/10 text-primary px-2.5 py-0.5 text-xs font-medium hover:bg-primary/20 transition-colors"
+            >
+              {e?.name ?? id}
+              <X className="h-3 w-3" />
+            </button>
+          );
+        })}
+        {hasDateFilter && (
+          <button
+            type="button"
+            onClick={removeDateFilter}
+            className="inline-flex items-center gap-1 rounded-full bg-primary/10 text-primary px-2.5 py-0.5 text-xs font-medium hover:bg-primary/20 transition-colors"
+          >
+            <CalendarIcon className="h-3 w-3" />
+            {activeDateLabel}
+            <X className="h-3 w-3" />
+          </button>
+        )}
+        {hasActiveFilters && (
           <button
             type="button"
             onClick={clearFilters}
@@ -1508,8 +1288,8 @@ function OrdersPageInner({ setImportOpen }: { setImportOpen: (open: boolean) => 
           >
             مسح الكل
           </button>
-        </div>
-      )}
+        )}
+      </div>
 
       {/* ── Bulk Actions Bar (shown when selection is active) ── */}
       {hasSelection && (
@@ -1735,23 +1515,6 @@ function OrdersPageInner({ setImportOpen }: { setImportOpen: (open: boolean) => 
         </div>
       )}
 
-      {/* ── Filters Modal ── */}
-      <FiltersModal
-        open={filterModalOpen}
-        onClose={() => setFilterModalOpen(false)}
-        statuses={statuses}
-        countries={filterableCountries}
-        employees={filterableUsers}
-        canFilterByEmployee={canFilterByEmployee && !usersLoading}
-        canFilterByCountry={canFilterByCountry}
-        currentStatuses={statusIds}
-        currentCountries={countryIds}
-        currentEmployees={employeeIds}
-        currentDateFrom={dateFrom}
-        currentDateTo={dateTo}
-        onApply={applyFilters}
-        onClear={clearFilters}
-      />
 
       {/* ── Bulk Status Dialog ── */}
       <BulkStatusDialog

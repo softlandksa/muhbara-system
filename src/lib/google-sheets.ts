@@ -238,6 +238,80 @@ export async function readSheetByName(
   return { spreadsheetId, sheetName, headers, rows };
 }
 
+export type ShippingWriteBackEntry = {
+  rowIndex: number;
+  /** Written to the Error Message column. Pass "" to clear a previous error. */
+  errorMessage: string;
+  /** Written to the Last Shipping Sync column. Pass "" to skip writing. */
+  lastShippingSync: string;
+};
+
+/**
+ * Batch-writes Error Message / Last Shipping Sync back to the sheet after a
+ * shipping-sync pass. Uses the actual column indices parsed from the header row.
+ */
+export async function writeShippingResults(
+  spreadsheetId: string,
+  sheetName: string,
+  entries: ShippingWriteBackEntry[],
+  errorMessageColIdx: number,
+  lastShippingSyncColIdx: number,
+): Promise<void> {
+  if (entries.length === 0) return;
+
+  console.log(
+    `[google-sheets] shipping write-back: ${entries.length} row(s) to sheet="${sheetName}" — ` +
+    `errorMessage col=${errorMessageColIdx} lastShippingSync col=${lastShippingSyncColIdx}`
+  );
+
+  const token = await getAccessToken();
+  const quotedName = quoteSheetName(sheetName);
+
+  const minCol = Math.min(errorMessageColIdx, lastShippingSyncColIdx);
+  const maxCol = Math.max(errorMessageColIdx, lastShippingSyncColIdx);
+  const startLetter = colIndexToA1(minCol);
+  const endLetter   = colIndexToA1(maxCol);
+
+  const data = entries.map((entry) => {
+    const rowData = new Array(maxCol - minCol + 1).fill("");
+    rowData[errorMessageColIdx - minCol]      = entry.errorMessage;
+    rowData[lastShippingSyncColIdx - minCol]  = entry.lastShippingSync;
+    return {
+      range: `${quotedName}!${startLetter}${entry.rowIndex}:${endLetter}${entry.rowIndex}`,
+      values: [rowData],
+    };
+  });
+
+  const BATCH_SIZE = 500;
+  for (let i = 0; i < data.length; i += BATCH_SIZE) {
+    const batch = data.slice(i, i + BATCH_SIZE);
+    console.log(
+      `[google-sheets] shipping batch update chunk ${Math.floor(i / BATCH_SIZE) + 1} — ${batch.length} ranges`
+    );
+    const res = await fetch(
+      `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values:batchUpdate`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ valueInputOption: "RAW", data: batch }),
+      }
+    );
+    if (!res.ok) {
+      const body = await res.text();
+      console.error(
+        `[google-sheets] shipping batch update failed — HTTP ${res.status}: ${body.slice(0, 400)}`
+      );
+      throw new Error(`فشل تحديث Google Sheets (${res.status}): ${body.slice(0, 200)}`);
+    }
+    console.log(`[google-sheets] shipping batch update chunk OK`);
+  }
+
+  console.log(`[google-sheets] all shipping write-back chunks completed for sheet="${sheetName}"`);
+}
+
 /**
  * Batch-writes Sync Status / System Order ID / Error Message back to the sheet.
  * Uses the actual column indices parsed from the header row.

@@ -436,6 +436,27 @@ model GoogleSheetSyncRun {
   @@index([startedAt])
 }
 
+model ShippingSheetSyncRun {
+  id                String    @id @default(cuid())
+  startedAt         DateTime
+  finishedAt        DateTime?
+  triggeredBy       String
+  triggeredByUserId String?
+  status            String
+  totalRows         Int       @default(0)
+  updatedCount      Int       @default(0)
+  noChangeCount     Int       @default(0)
+  skippedEmptyCount Int       @default(0)
+  notFoundCount     Int       @default(0)
+  failedCount       Int       @default(0)
+  errorSummary      String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@index([status])
+  @@index([startedAt])
+}
+
 enum Role {
   ADMIN
   SALES_MANAGER

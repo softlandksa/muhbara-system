@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
 import {
-  RefreshCw, RotateCcw, Loader2,
+  RefreshCw, RotateCcw, Loader2, Truck,
   Clock, User, Mail, Shield, CalendarDays, Timer, AlertTriangle,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils";
 import { ROLE_LABELS } from "@/lib/permissions";
 import type { Role } from "@/types";
 import { SyncSummaryModal, type SyncSummaryData } from "@/components/shared/SyncSummaryModal";
+import { ShippingSyncSummaryModal, type ShippingSyncSummaryData } from "@/components/shared/ShippingSyncSummaryModal";
 import {
   Tooltip, TooltipTrigger, TooltipContent, TooltipProvider,
 } from "@/components/ui/tooltip";
@@ -68,8 +69,23 @@ type SyncResultData = {
   deletedCount: number;
 };
 
+type ShippingSyncResultData = {
+  totalRows: number;
+  updatedCount: number;
+  noChangeCount: number;
+  skippedEmptyCount: number;
+  notFoundCount: number;
+  failedCount: number;
+};
+
 type SyncResponse = {
   data?: SyncResultData;
+  error?: string;
+  debug?: string;
+};
+
+type ShippingSyncResponse = {
+  data?: ShippingSyncResultData;
   error?: string;
   debug?: string;
 };
@@ -134,7 +150,7 @@ function ResyncConfirmModal({
   );
 }
 
-// ─── Tooltip content shared between both cards ────────────────────────────────
+// ─── Tooltip content shared between cards ─────────────────────────────────────
 
 function SyncTooltipContent({
   syncInfo,
@@ -192,7 +208,7 @@ type SyncCardProps = {
   label: string;
   runningLabel: string;
   icon: React.ReactNode;
-  accentColor: "green" | "red";
+  accentColor: "green" | "red" | "amber";
   statusLabel: string;
   syncInfo: SyncEntry;
   isRunning: boolean;
@@ -208,7 +224,21 @@ function SyncCard({
   const isCron     = syncInfo?.triggeredBy === "CRON";
   const byLabel    = syncInfo?.updatedBy?.name ?? (isCron ? "جدولة تلقائية" : null);
   const hasFailed  = syncInfo?.status === "FAILED";
-  const isGreen    = accentColor === "green";
+
+  const colorClasses = {
+    green: {
+      bg:      "bg-green-600",
+      hover:   "hover:bg-green-500 hover:scale-105 hover:shadow-lg hover:shadow-green-500/40",
+    },
+    red: {
+      bg:      "bg-red-600",
+      hover:   "hover:bg-red-500 hover:scale-105 hover:shadow-lg hover:shadow-red-500/40",
+    },
+    amber: {
+      bg:      "bg-amber-500",
+      hover:   "hover:bg-amber-400 hover:scale-105 hover:shadow-lg hover:shadow-amber-500/40",
+    },
+  }[accentColor];
 
   return (
     <div
@@ -225,11 +255,8 @@ function SyncCard({
           "text-sm font-semibold text-white",
           "transition-all duration-200 ease-out",
           "active:scale-95",
-          isGreen
-            ? "bg-green-600"
-            : "bg-red-600",
-          !disabled && isGreen && "hover:bg-green-500 hover:scale-105 hover:shadow-lg hover:shadow-green-500/40",
-          !disabled && !isGreen && "hover:bg-red-500 hover:scale-105 hover:shadow-lg hover:shadow-red-500/40",
+          colorClasses.bg,
+          !disabled && colorClasses.hover,
           disabled && "opacity-60 cursor-not-allowed",
         )}
       >
@@ -280,33 +307,48 @@ function SyncCard({
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-const RESYNC_ROLES: Role[] = ["ADMIN", "GENERAL_MANAGER"];
+const RESYNC_ROLES: Role[]          = ["ADMIN", "GENERAL_MANAGER"];
+const SHIPPING_SYNC_ROLES: Role[]   = ["ADMIN", "GENERAL_MANAGER", "SHIPPING"];
 
 export function GoogleSheetSyncButton({
   onSyncDone,
 }: {
   onSyncDone?: () => void;
 }) {
-  const [syncing, setSyncing]         = useState(false);
-  const [activeMode, setActiveMode]   = useState<"update" | "resync" | null>(null);
-  const [showConfirm, setShowConfirm] = useState(false);
-  const [summary, setSummary]         = useState<SyncSummaryData | null>(null);
-  const queryClient                   = useQueryClient();
-  const { data: session }             = useSession();
+  const [syncing, setSyncing]                   = useState(false);
+  const [activeMode, setActiveMode]             = useState<"update" | "resync" | "shipping" | null>(null);
+  const [showConfirm, setShowConfirm]           = useState(false);
+  const [summary, setSummary]                   = useState<SyncSummaryData | null>(null);
+  const [shippingSummary, setShippingSummary]   = useState<ShippingSyncSummaryData | null>(null);
+  const queryClient                             = useQueryClient();
+  const { data: session }                       = useSession();
 
-  const userRole  = session?.user?.role as Role | undefined;
-  const canResync = userRole ? RESYNC_ROLES.includes(userRole) : false;
+  const userRole       = session?.user?.role as Role | undefined;
+  const canResync      = userRole ? RESYNC_ROLES.includes(userRole) : false;
+  const canShipSync    = userRole ? SHIPPING_SYNC_ROLES.includes(userRole) : false;
 
-  const { data } = useQuery<{ update: SyncEntry; resync: SyncEntry }>({
+  // ── Order sync last-run ───────────────────────────────────────────────────
+  const { data: orderSyncData } = useQuery<{ update: SyncEntry; resync: SyncEntry }>({
     queryKey: ["google-sheets-last-sync"],
     queryFn: () => fetch("/api/google-sheets/last-sync").then((r) => r.json()),
     staleTime: 30_000,
     refetchInterval: 60_000,
   });
 
-  const updateInfo = data?.update ?? null;
-  const resyncInfo = data?.resync ?? null;
+  // ── Shipping sync last-run ────────────────────────────────────────────────
+  const { data: shippingSyncData } = useQuery<{ shipping: SyncEntry }>({
+    queryKey: ["shipping-sheet-last-sync"],
+    queryFn: () => fetch("/api/google-sheets/shipping-sync/last-sync").then((r) => r.json()),
+    staleTime: 30_000,
+    refetchInterval: 60_000,
+    enabled: canShipSync,
+  });
 
+  const updateInfo  = orderSyncData?.update  ?? null;
+  const resyncInfo  = orderSyncData?.resync  ?? null;
+  const shippingInfo = shippingSyncData?.shipping ?? null;
+
+  // ── Order sync handler ────────────────────────────────────────────────────
   async function handleSync(mode: "update" | "resync") {
     if (syncing) return;
     setSyncing(true);
@@ -361,10 +403,61 @@ export function GoogleSheetSyncButton({
     }
   }
 
+  // ── Shipping sync handler ─────────────────────────────────────────────────
+  async function handleShippingSync() {
+    if (syncing) return;
+    setSyncing(true);
+    setActiveMode("shipping");
+    try {
+      const res = await fetch("/api/google-sheets/shipping-sync", { method: "POST" });
+
+      const text  = await res.text();
+      let json: ShippingSyncResponse = {};
+      const looksJson = res.headers.get("content-type")?.includes("application/json")
+        || text.trimStart().startsWith("{");
+      if (looksJson) {
+        try { json = JSON.parse(text); } catch { /* fall through */ }
+      }
+
+      if (!res.ok) {
+        if (json.debug) console.error("[ShippingSync] debug:", json.debug);
+        toast.error(json.error ?? `فشل تحديث الشحن — خطأ ${res.status}`);
+        return;
+      }
+
+      if (json.data) {
+        setShippingSummary({
+          totalRows:         json.data.totalRows,
+          updatedCount:      json.data.updatedCount,
+          noChangeCount:     json.data.noChangeCount,
+          skippedEmptyCount: json.data.skippedEmptyCount,
+          notFoundCount:     json.data.notFoundCount,
+          failedCount:       json.data.failedCount,
+          syncedAt:          new Date(),
+          updatedBy:         null,
+        });
+      } else {
+        toast.success("تم تحديث بيانات الشحن بنجاح");
+      }
+
+      await queryClient.invalidateQueries({ queryKey: ["shipping-sheet-last-sync"] });
+      onSyncDone?.();
+    } catch (err) {
+      console.error("[ShippingSync] network error:", err);
+      toast.error("تعذر الاتصال بالخادم — تحقق من اتصالك");
+    } finally {
+      setSyncing(false);
+      setActiveMode(null);
+    }
+  }
+
   return (
     <>
       {summary && (
         <SyncSummaryModal data={summary} onClose={() => setSummary(null)} />
+      )}
+      {shippingSummary && (
+        <ShippingSyncSummaryModal data={shippingSummary} onClose={() => setShippingSummary(null)} />
       )}
       {showConfirm && (
         <ResyncConfirmModal
@@ -373,7 +466,7 @@ export function GoogleSheetSyncButton({
         />
       )}
 
-      {/* ── Two independent cards, side by side ─────────────────────────── */}
+      {/* ── Three independent cards, side by side ───────────────────────── */}
       <div className="flex flex-wrap gap-4 items-start">
 
         <SyncCard
@@ -399,6 +492,20 @@ export function GoogleSheetSyncButton({
             isRunning={syncing && activeMode === "resync"}
             disabled={syncing}
             onSync={() => setShowConfirm(true)}
+          />
+        )}
+
+        {canShipSync && (
+          <SyncCard
+            label="تحديث الشحن"
+            runningLabel="جاري تحديث الشحن..."
+            icon={<Truck className="h-4 w-4 shrink-0" />}
+            accentColor="amber"
+            statusLabel="آخر تحديث شحن"
+            syncInfo={shippingInfo}
+            isRunning={syncing && activeMode === "shipping"}
+            disabled={syncing}
+            onSync={handleShippingSync}
           />
         )}
 

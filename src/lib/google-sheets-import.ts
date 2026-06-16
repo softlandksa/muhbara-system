@@ -464,6 +464,7 @@ export async function runGoogleSheetsImport(
           // A soft-deleted order is invisible in the UI and must be treated
           // as non-existent so the sheet row can create a fresh order.
           let existingOrder: ExistingOrder | null = null;
+          let detectedVia: string = "none";
 
           if (systemOrderIdInSheet) {
             existingOrder = await prisma.order.findFirst({
@@ -472,7 +473,8 @@ export async function runGoogleSheetsImport(
             }) as ExistingOrder | null;
 
             if (existingOrder) {
-              console.log("SYNC_EXISTING_ORDER_FOUND", { sheet: sheetName, rowIndex, via: "systemOrderId", orderNumber: existingOrder.orderNumber });
+              detectedVia = "systemOrderId";
+              console.log("SYNC_EXISTING_ORDER_FOUND", { sheet: sheetName, rowIndex, via: "systemOrderId", orderNumber: existingOrder.orderNumber, externalOrderId: externalOrderId || "empty" });
             } else {
               // Detect soft-deleted version so we can log it specifically
               const hiddenCount = await prisma.order.count({
@@ -493,7 +495,8 @@ export async function runGoogleSheetsImport(
               }) as ExistingOrder | null;
 
               if (existingOrder) {
-                console.log("SYNC_EXISTING_ORDER_FOUND", { sheet: sheetName, rowIndex, via: "importLog", orderId: log.systemOrderId });
+                detectedVia = "importLog";
+                console.log("SYNC_EXISTING_ORDER_FOUND", { sheet: sheetName, rowIndex, via: "importLog", orderId: log.systemOrderId, externalOrderId });
               } else {
                 // Could be hard-deleted or soft-deleted — check which
                 const hiddenCount = await prisma.order.count({
@@ -504,17 +507,29 @@ export async function runGoogleSheetsImport(
                 }
                 // Either way, fall through to create a fresh order
               }
+            } else if (log && log.status !== "SYNCED") {
+              // Log was previously processed but in a non-SYNCED state (FAILED, DUPLICATE, DELETED)
+              console.log("SYNC_IMPORT_LOG_EXISTS_NOT_SYNCED", { sheet: sheetName, rowIndex, externalOrderId, logStatus: log.status });
             }
           }
 
-          console.log("GOOGLE_SYNC_MATCH_FOUND", { sheet: sheetName, rowIndex, found: !!existingOrder });
+          // Log the per-row decision summary so every row is traceable
+          console.log("GOOGLE_SYNC_ROW_DECISION", {
+            sheet: sheetName,
+            rowIndex,
+            externalOrderId: externalOrderId || "empty",
+            systemOrderIdInSheet: systemOrderIdInSheet || "empty",
+            existingOrderNumber: existingOrder?.orderNumber ?? "none",
+            detectedVia,
+            mode,
+          });
 
           // ── E. Existing order handling ─────────────────────────────────
           if (existingOrder) {
             if (mode === "update") {
               // "update" mode never modifies existing orders
               noChangeCount++;
-              console.log("GOOGLE_SYNC_NO_CHANGE", { sheet: sheetName, rowIndex, orderNumber: existingOrder.orderNumber, mode });
+              console.log("GOOGLE_SYNC_ACTION", { action: "SKIP", reason: "existing_order", sheet: sheetName, rowIndex, externalOrderId: externalOrderId || "empty", orderNumber: existingOrder.orderNumber, detectedVia, mode });
               sheetWriteBacks.push({
                 rowIndex, syncStatus: "No Change",
                 systemOrderId: existingOrder.orderNumber, errorMessage: "",
@@ -580,14 +595,14 @@ export async function runGoogleSheetsImport(
                 const normPhone = normalizePhone(phone);
                 if (normPhone) existingPhones.add(normPhone);
 
-                console.log("GOOGLE_SYNC_UPDATED", { sheet: sheetName, rowIndex, orderNumber: existingOrder.orderNumber });
+                console.log("GOOGLE_SYNC_ACTION", { action: "UPDATE", sheet: sheetName, rowIndex, externalOrderId: externalOrderId || "empty", orderNumber: existingOrder.orderNumber, detectedVia, mode });
                 sheetWriteBacks.push({
                   rowIndex, syncStatus: "Updated",
                   systemOrderId: existingOrder.orderNumber, errorMessage: "",
                 });
               } else {
                 noChangeCount++;
-                console.log("GOOGLE_SYNC_NO_CHANGE", { sheet: sheetName, rowIndex, orderNumber: existingOrder.orderNumber });
+                console.log("GOOGLE_SYNC_ACTION", { action: "SKIP", reason: "no_change", sheet: sheetName, rowIndex, externalOrderId: externalOrderId || "empty", orderNumber: existingOrder.orderNumber, detectedVia, mode });
                 sheetWriteBacks.push({
                   rowIndex, syncStatus: "No Change",
                   systemOrderId: existingOrder.orderNumber, errorMessage: "",
@@ -687,7 +702,7 @@ export async function runGoogleSheetsImport(
             importedCount++;
             if (normPhone) existingPhones.add(normPhone);
 
-            console.log("GOOGLE_SYNC_CREATED", { sheet: sheetName, rowIndex, orderNumber: order.orderNumber });
+            console.log("GOOGLE_SYNC_ACTION", { action: "CREATE", sheet: sheetName, rowIndex, externalOrderId: externalOrderId || "empty", orderNumber: order.orderNumber, mode });
             sheetWriteBacks.push({ rowIndex, syncStatus: "Synced", systemOrderId: order.orderNumber, errorMessage: "" });
             activityQueue.push({ userId: employee!.id, orderId: order.id, orderNumber: order.orderNumber });
           } catch (err) {

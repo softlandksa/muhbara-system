@@ -7,10 +7,14 @@ export async function generateOrderNumber(
 ): Promise<string> {
   const year = new Date().getFullYear();
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(${ORDER_NUMBER_LOCK_ID})`;
-  const count = await tx.order.count({
+  // Use MAX(last sequence) not COUNT — COUNT breaks when rows are hard-deleted (gaps in sequence).
+  const last = await tx.order.findFirst({
     where: { orderNumber: { startsWith: `ORD-${year}-` } },
+    orderBy: { orderNumber: "desc" },
+    select: { orderNumber: true },
   });
-  const seq = String(count + 1).padStart(5, "0");
+  const lastSeq = last ? parseInt(last.orderNumber.slice(-5), 10) : 0;
+  const seq = String(lastSeq + 1).padStart(5, "0");
   return `ORD-${year}-${seq}`;
 }
 
@@ -24,9 +28,13 @@ export async function generateOrderNumbers(
   if (count === 0) return [];
   const year = new Date().getFullYear();
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(${ORDER_NUMBER_LOCK_ID})`;
-  const base = await tx.order.count({
+  // Use MAX(last sequence) not COUNT — same gap-safety fix as generateOrderNumber.
+  const last = await tx.order.findFirst({
     where: { orderNumber: { startsWith: `ORD-${year}-` } },
+    orderBy: { orderNumber: "desc" },
+    select: { orderNumber: true },
   });
+  const base = last ? parseInt(last.orderNumber.slice(-5), 10) : 0;
   return Array.from({ length: count }, (_, i) =>
     `ORD-${year}-${String(base + i + 1).padStart(5, "0")}`,
   );
